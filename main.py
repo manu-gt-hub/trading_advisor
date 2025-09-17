@@ -6,7 +6,7 @@ def main():
     
     secret = os.getenv("SECRET_TEST")
     
-    if secret:
+    if secret == 'botella007':
         print("✅ El secret fue cargado correctamente.")
         print(f"El secret despues de acceder a el es: {secret}")
     else:
