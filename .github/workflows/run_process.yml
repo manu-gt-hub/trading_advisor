@@ -3,6 +3,7 @@ name: run process
 on:
   schedule:
     - cron: '0 6 * * *'  # Ejecutar a las 06:00 UTC diariamente
+  workflow_dispatch:
 
 permissions:
   contents: read
