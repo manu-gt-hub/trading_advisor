@@ -1,17 +1,6 @@
 import os
 
 def main():
-    secret = os.getenv("SECRET_TEST")
-    print(f"El secret es: {secret}")
-
-if __name__ == "__main__":
-    main()
-
-
-
-import os
-
-def main():
     secret = "empty"
     print(f"El secret antes de acceder a el es: {secret}")
     
