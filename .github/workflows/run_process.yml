@@ -6,17 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # Permisos para permitir push
+  contents: write   # Para permitir push
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout del repositorio
+      # Checkout rama main para ejecutar main.py
+      - name: Checkout rama main
         uses: actions/checkout@v4
         with:
-          ref: data
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configurar Python 3.10
@@ -29,15 +29,32 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # Ejecutar script desde main
       - name: Ejecutar main.py
         env:
           SECRET_TEST: ${{ secrets.SECRET_TEST }}
         run: python main.py
-        
-      - name: Commit y push de cambios
+
+      # Checkout rama data en carpeta data_branch
+      - name: Checkout rama data
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: data_branch
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mover CSV generado a la carpeta data_branch para commit
+      - name: Mover CSV a carpeta data_branch
+        run: |
+          mkdir -p data_branch/data
+          mv data/data.csv data_branch/data/data.csv
+
+      # Commit y push cambios en data
+      - name: Commit y push cambios en data
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cd data_branch
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/data.csv
