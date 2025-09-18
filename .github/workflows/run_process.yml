@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
+        with:
+          ref: data
+          persist-credentials: false
 
       - name: Configurar Python 3.10
         uses: actions/setup-python@v4
