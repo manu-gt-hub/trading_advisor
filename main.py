@@ -24,7 +24,7 @@ def leer_csv(path):
     return df
 
 def añadir_fila(df):
-    nueva_fila = {"Nombre": "Carlos", "Edad": 30, "Ciudad": "Sevilla"}
+    nueva_fila = {"Nombre": "New Insert", "Edad": 30, "Ciudad": "Sevilla"}
     df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
     return df
 
