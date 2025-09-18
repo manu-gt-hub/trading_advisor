@@ -1,32 +1,25 @@
 import pandas as pd
 import os
 
-# Ruta del archivo CSV
-CSV_PATH = "output/data.csv"
+CSV_PATH = "data/data.csv"
 
-def crear_dataframe_inicial():
-    data = {
-        "Nombre": ["Ana", "Luis", "María"],
-        "Edad": [28, 34, 25],
-        "Ciudad": ["Madrid", "Barcelona", "Valencia"]
-    }
-    df = pd.DataFrame(data)
-    return df
-
-def guardar_csv(df, path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    df.to_csv(path, index=False)
-    print(f"✅ CSV guardado en: {path}")
-
-def leer_csv(path):
-    df = pd.read_csv(path)
-    print(f"📄 CSV leído desde: {path}")
+def cargar_o_crear_dataframe():
+    if os.path.exists(CSV_PATH):
+        df = pd.read_csv(CSV_PATH)
+        print("✅ CSV cargado.")
+    else:
+        df = pd.DataFrame(columns=["Nombre", "Edad", "Ciudad"])
+        print("📄 CSV no encontrado. Creando uno nuevo.")
     return df
 
 def añadir_fila(df):
-    nueva_fila = {"Nombre": "New Insert", "Edad": 30, "Ciudad": "Sevilla"}
-    df = pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
-    return df
+    nueva_fila = {"Nombre": "Carlos", "Edad": 30, "Ciudad": "Sevilla"}
+    return pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
+
+def guardar_dataframe(df):
+    os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)
+    df.to_csv(CSV_PATH, index=False)
+    print(f"💾 CSV guardado en {CSV_PATH}")
 
 def main():
     # SECRET AREA
@@ -46,17 +39,14 @@ def main():
 
     # CSV AREA
     print("🔧 Creando DataFrame inicial...")
-    df = crear_dataframe_inicial()
-    guardar_csv(df, CSV_PATH)
-
-    print("📥 Leyendo CSV...")
-    df_leido = leer_csv(CSV_PATH)
-
+    df = cargar_o_crear_dataframe()
+    
     print("➕ Añadiendo nueva fila...")
-    df_modificado = añadir_fila(df_leido)
+    df = añadir_fila(df)
 
     print("💾 Guardando CSV actualizado...")
-    guardar_csv(df_modificado, CSV_PATH)
+    guardar_dataframe(df)
+
 
 if __name__ == "__main__":
     main()
