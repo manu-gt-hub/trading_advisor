@@ -30,14 +30,18 @@ def cargar_o_crear_dataframe():
         done = False
         while not done:
             status, done = downloader.next_chunk()
-        fh.seek(0)
+
+        # Guardamos el contenido en bytes
+        file_bytes = fh.getvalue()
 
         # Guardar backup local para inspección (opcional)
         with open("backup_drive.csv", "wb") as f:
-            f.write(fh.read())
-        fh.seek(0)
+            f.write(file_bytes)
 
-        df = pd.read_csv(fh)
+        # Crear nuevo BytesIO para leer con pandas
+        fh2 = io.BytesIO(file_bytes)
+
+        df = pd.read_csv(fh2)
         print(f"✅ CSV cargado desde Google Drive con {len(df)} filas.")
     except Exception as e:
         print(f"📄 CSV no encontrado en Drive o error: {e}. Creando uno nuevo.")
