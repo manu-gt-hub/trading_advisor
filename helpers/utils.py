@@ -31,8 +31,14 @@ def cargar_o_crear_dataframe():
         while not done:
             status, done = downloader.next_chunk()
         fh.seek(0)
+
+        # Guardar backup local para inspección (opcional)
+        with open("backup_drive.csv", "wb") as f:
+            f.write(fh.read())
+        fh.seek(0)
+
         df = pd.read_csv(fh)
-        print("✅ CSV cargado desde Google Drive.")
+        print(f"✅ CSV cargado desde Google Drive con {len(df)} filas.")
     except Exception as e:
         print(f"📄 CSV no encontrado en Drive o error: {e}. Creando uno nuevo.")
         df = pd.DataFrame(columns=["value", "date"])
@@ -43,6 +49,7 @@ def añadir_fila(df):
         "value": 143.23,
         "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
+    print(f"📝 Añadiendo nueva fila: {nueva_fila}")
     return pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
 
 def guardar_dataframe(df):
@@ -58,4 +65,4 @@ def guardar_dataframe(df):
         media_body=media
     ).execute()
     os.remove(temp_csv)
-    print(f"💾 CSV guardado en Google Drive, archivo ID: {updated_file['id']}")
+    print(f"💾 CSV guardado en Google Drive, archivo ID: {updated_file['id']}, filas totales: {len(df)}")
