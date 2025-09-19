@@ -32,14 +32,3 @@ jobs:
         env:
           SECRET_TEST: ${{ secrets.SECRET_TEST }}
         run: python main.py
-
-      - name: Commit y push cambios en main
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          git config user.name "manu-gt-hub"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/data.csv
-          git commit -m "Actualizar CSV automáticamente [ci skip]" || echo "No hay cambios"
-          git remote set-url origin https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}.git
-          git push --force origin main
