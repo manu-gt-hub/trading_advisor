@@ -2,7 +2,7 @@ name: run process
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Ejecutar a las 06:00 UTC diariamente
+    - cron: '0 5 * * *'  # Ejecutar a las 07:00 UTC diariamente
   workflow_dispatch:
 
 permissions:
@@ -42,4 +42,4 @@ jobs:
           git add data/data.csv
           git commit -m "Actualizar CSV automáticamente [ci skip]" || echo "No hay cambios"
           git remote set-url origin https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}.git
-          git push origin main
+          git push --force origin main
