@@ -31,4 +31,6 @@ jobs:
       - name: Ejecutar main.py
         env:
           SECRET_TEST: ${{ secrets.SECRET_TEST }}
+          GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
+          GDRIVE_FILE_ID: ${{ secrets.GDRIVE_FILE_ID }}
         run: python main.py
