@@ -24,29 +24,27 @@ def cargar_o_crear_dataframe():
     if not file_id:
         raise Exception("No se encontró la variable de entorno GDRIVE_FILE_ID")
     try:
-        request = service.files().get_media(fileId=file_id)
+        # Cambiar get_media por export_media con mimeType CSV
+        request = service.files().export_media(fileId=file_id, mimeType='text/csv')
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done:
             status, done = downloader.next_chunk()
 
-        # Guardamos el contenido en bytes
         file_bytes = fh.getvalue()
 
-        # Guardar backup local para inspección (opcional)
         with open("backup_drive.csv", "wb") as f:
             f.write(file_bytes)
 
-        # Crear nuevo BytesIO para leer con pandas
         fh2 = io.BytesIO(file_bytes)
-
         df = pd.read_csv(fh2)
-        print(f"✅ CSV cargado desde Google Drive con {len(df)} filas.")
+        print(f"✅ CSV cargado desde Google Drive (Google Sheets export) con {len(df)} filas.")
     except Exception as e:
         print(f"📄 CSV no encontrado en Drive o error: {e}. Creando uno nuevo.")
         df = pd.DataFrame(columns=["value", "date"])
     return df
+
 
 def añadir_fila(df):
     nueva_fila = {
