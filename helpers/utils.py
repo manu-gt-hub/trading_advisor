@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from datetime import datetime
 
 CSV_PATH = "data/data.csv"
 
@@ -8,12 +9,15 @@ def cargar_o_crear_dataframe():
         df = pd.read_csv(CSV_PATH)
         print("✅ CSV cargado.")
     else:
-        df = pd.DataFrame(columns=["Nombre", "Edad", "Ciudad"])
+        df = pd.DataFrame(columns=["value", "date"])
         print("📄 CSV no encontrado. Creando uno nuevo.")
     return df
 
 def añadir_fila(df):
-    nueva_fila = {"Nombre": "Carlos", "Edad": 30, "Ciudad": "Sevilla"}
+    nueva_fila = {
+        "value": 143.23,
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")  
+    }
     return pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
 
 def guardar_dataframe(df):
