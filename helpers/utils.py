@@ -2,7 +2,7 @@ import pandas as pd
 import os
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -49,7 +49,7 @@ def cargar_o_crear_dataframe():
 def añadir_fila(df):
     nueva_fila = {
         "value": 143.23,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     }
     print(f"📝 Añadiendo nueva fila: {nueva_fila}")
     return pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
