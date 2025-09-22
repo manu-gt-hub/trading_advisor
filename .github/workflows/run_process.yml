@@ -1,8 +1,8 @@
 name: run process
 
 on:
-  schedule:
-    - cron: '0 5 * * *'  # Ejecutar a las 07:00 UTC diariamente
+  #schedule:
+  #  - cron: '0 5 * * *'  # Ejecutar a las 07:00 UTC diariamente
   workflow_dispatch:
 
 permissions:
