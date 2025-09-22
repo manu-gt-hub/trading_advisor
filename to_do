@@ -1,0 +1,10 @@
+- email reporte compras:
+  | nombre stock | valor actual | trading view opinion | metricas | razones por las que comprar segun IA|
+
+- email reporte valor alcanzado:
+  | nombre stock | valor de compra | fecha de compra | valor alcanzado | numero de dias entre valor de compra y valor alcanzado |
+
+- csv
+  escribir compras cuando el análisis sea positivo para simular compra.
+
+  | nombre stock | valor compra | fecha de compra | valor esperado | fecha valor alcanzado | valor de venta | num dias entre valor compra y alcanzado |
