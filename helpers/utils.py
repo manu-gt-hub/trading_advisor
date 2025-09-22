@@ -2,7 +2,8 @@ import pandas as pd
 import os
 import io
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -47,9 +48,11 @@ def cargar_o_crear_dataframe():
 
 
 def añadir_fila(df):
+    now_madrid = datetime.now(ZoneInfo("Europe/Madrid"))
+    
     nueva_fila = {
         "value": 143.23,
-        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        "date": now_madrid.strftime("%Y-%m-%d %H:%M:%S")
     }
     print(f"📝 Añadiendo nueva fila: {nueva_fila}")
     return pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
