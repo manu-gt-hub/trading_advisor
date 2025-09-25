@@ -8,3 +8,7 @@
   escribir compras cuando el análisis sea positivo para simular compra.
 
   | nombre stock | valor compra | fecha de compra | valor esperado | fecha valor alcanzado | valor de venta | num dias entre valor compra y alcanzado |
+
+- añadir analisis criptos
+
+- añadir log de errores y postearlo en google drive
