@@ -1,32 +1,86 @@
+from dotenv import load_dotenv
+import ast
 import os
-from tools.google_handler import load_data, add_row, save_dataframe
+import pandas as pd
+import logging
+from tools import google_handler,finnhub_client,historicals,web_scrapper,custom_financial_calc as cfc,general,llms
+from datetime import datetime
+import numpy as np
+import pytz  # o usa zoneinfo si estás en Python 3.9+
+
+# Load .env file only if not running in production (e.g., GitHub Actions)
+if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
+    load_dotenv()
 
 def main():
-    # SECRET AREA
-    secret = "empty"
-    print(f"El secret antes de acceder a el es: {secret}")
+
+    # Set up logging configuration
+    log_level_str = os.getenv("LOG_LEVEL").upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+
+    logging.basicConfig(level=log_level)
+    logger = logging.getLogger(__name__)
+
+    symbol_list = ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST", "[]"))
+    revenue_percentage =os.environ.get("REVENUE_PERCENTAGE")
     
-    secret = os.getenv("SECRET_TEST")
+    top_losers_data = finnhub_client.analyze_market_losers_from_interest_list(symbol_list)
 
-    if secret != 'empty':
-         print("✅ El secret fue cargado correctamente.")
+    analysis_df = pd.DataFrame(top_losers_data)
+
+    for loser in top_losers_data:
+
+        symbol=loser['symbol']
+        current_price=loser['current_price']
+        # get historical data        
+        hist_data = historicals.get_historical_data(symbol)
+        
+        # get interest metrics
+        metrics = cfc.evaluate_buy_interest(symbol,hist_data,current_price)
+
+        # get trading view opinion
+        td_opinion = web_scrapper.get_trading_view_opinion(symbol)
+
+        # add opinions
+        general.add_opinion(symbol,analysis_df,"manual_financial_analysis",metrics["evaluation"])
+        general.add_opinion(symbol,analysis_df,"trading_view_opinion",td_opinion)
+
+        if "failed" not in metrics["evaluation"]:
+            general.add_opinion(symbol,analysis_df,"llm_opinion",llms.get_llm_signals_analysis( metrics["signals"],symbol,current_price))
+        else:
+            general.add_opinion(symbol,analysis_df,"llm_opinion","error: metrics not provided")
     
-    if secret == 'madness':
-        print("✅ El contenido del secret fue cargado correctamente.")
-        print(f"El secret despues de acceder a el es: {secret}")
-    else:
-        print("❌ El contenido del secret no es correcto.")
+    # generate and filter by decision column where is BUY
+    analysis_df = general.generate_decision_column(analysis_df)
+    buy_df = analysis_df[analysis_df['decision'] == 'BUY']   
 
-    # CSV AREA
-    print("🔧 Creando DataFrame inicial...")
-    df = load_dataframe()
+    # update transaction log
+    transactions_file_id = os.environ.get("GDRIVE_FILE_ID")
+
+    transactions_df = google_handler.load_data(transactions_file_id)    
+    trans_updated_df = google_handler.update_transactions(analysis_df,transactions_df, revenue_percentage)
+
+    final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
+                    .sort_values(by='buy_date', ascending=False).head(365)
     
-    print("➕ Añadiendo nueva fila...")
-    df = añadir_fila(df)
+    google_handler.save_dataframe_file_id(final_df,transactions_file_id)
 
-    print("💾 Guardando CSV actualizado...")
-    guardar_dataframe(df)
+    # get Madrid time
+    madrid_tz = pytz.timezone('Europe/Madrid')
+    now_madrid = datetime.now(madrid_tz)
+
+    buy_df['recommendation_date'] = now_madrid
+
+    # if dataframe is empty we create at least 1 row to control that the process is being executed
+    if buy_df.empty:
+        empty_row = {col: (now_madrid if col == 'recommendation_date' else np.nan) for col in buy_df.columns}
+        empty_df = pd.DataFrame([empty_row])
+        buy_df = pd.concat([buy_df, empty_df], ignore_index=True)
 
 
+    buy_file_id = os.environ.get("BUY_RECOMMENDATIONS_ID")
+    google_handler.save_dataframe_file_id(buy_df,buy_file_id)
+
+    
 if __name__ == "__main__":
     main()

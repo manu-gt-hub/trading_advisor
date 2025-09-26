@@ -8,17 +8,24 @@ on:
   workflow_dispatch:  # Permite ejecutar el workflow manualmente desde la interfaz
 
 jobs:
-  test:
+  run-tests:
     runs-on: ubuntu-latest
     env:
-      GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
-      ALPHA_VANTAGE_URL: ${{ secrets.ALPHA_VANTAGE_URL }}
+      GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}      
       ALPHA_API_KEY: ${{ secrets.ALPHA_API_KEY }}
       GDRIVE_FILE_ID: ${{ secrets.GDRIVE_FILE_ID }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+      TRADING_ADVISOR_FOLDER_ID: ${{ secrets.FINNHUB_API_KEY }}
+      BUY_RECOMMENDATIONS_ID: ${{ secrets.BUY_RECOMMENDATIONS_ID }}
+      
+      ALPHA_VANTAGE_URL: ${{ vars.ALPHA_VANTAGE_URL }}
       REVENUE_PERCENTAGE: ${{ vars.REVENUE_PERCENTAGE }}      
       SYMBOLS_INTEREST_LIST: ${{ vars.SYMBOLS_INTEREST_LIST }}      
-      MAILING_LIST: ${{ vars.MAILING_LIST }}      
+      MAILING_LIST: ${{ vars.MAILING_LIST }}
+      GOOGLE_FINANCE_LOSERS_URL: ${{ vars.GOOGLE_FINANCE_LOSERS_URL }}   
+      LOG_LEVEL:  ${{ vars.LOG_LEVEL }}   
+       
 
     steps:
       - name: Checkout repository
@@ -34,6 +41,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
+
+      - name: Install Google Chrome
+        run: |
+          sudo apt update
+          sudo apt install -y wget gnupg unzip
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt update
+          sudo apt install -y google-chrome-stable
 
       - name: Run tests with pytest
         run: |

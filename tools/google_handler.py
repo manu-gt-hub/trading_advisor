@@ -6,7 +6,16 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from datetime import datetime
+import logging
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+# Load .env file only if not running in production (e.g., GitHub Actions)
+if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
+    load_dotenv()
 
 def get_drive_service():
     # Retrieve Google Drive service client using credentials from environment variable
@@ -20,10 +29,10 @@ def get_drive_service():
     service = build("drive", "v3", credentials=credentials)
     return service
 
-def load_data():
+def load_data(file_id):
     # Load CSV data exported from Google Sheets on Google Drive
     service = get_drive_service()
-    file_id = os.environ.get("GDRIVE_FILE_ID")
+    
     if not file_id:
         raise Exception("Environment variable GDRIVE_FILE_ID not found")
     try:
@@ -37,47 +46,70 @@ def load_data():
 
         file_bytes = fh.getvalue()
 
-        # Save a local backup of the downloaded CSV
-        with open("backup_drive.csv", "wb") as f:
-            f.write(file_bytes)
+        df = pd.read_csv(io.BytesIO(file_bytes))
+        logger.info(f"✅ CSV loaded from Google Drive (Google Sheets export) with {len(df)} rows.")
 
-        fh2 = io.BytesIO(file_bytes)
-        df = pd.read_csv(fh2)
-        print(f"✅ CSV loaded from Google Drive (Google Sheets export) with {len(df)} rows.")
     except Exception as e:
-        print(f"📄 CSV not found on Drive or error occurred: {e}. Creating a new empty DataFrame.")
-        df = pd.DataFrame(columns=["value", "date"])
+
+        logger.error(f"❌ CSV not found on Drive or error occurred: {e}.")
+        return None
     return df
 
-def add_row(df):
-    # Add a new row with current datetime (Europe/Madrid timezone) and fixed value
-    now_madrid = datetime.now(ZoneInfo("Europe/Madrid"))
+def update_transactions(df_analysis, df_transactions, revenue_percentage):
+    # Make a copy to avoid changing the original dataframe
+    df_transactions = df_transactions.copy()
     
-    new_row = {
-        "symbol" : "",
-        "current_price" : 0,
-        "buy_date" : '', 
-        "amount" : 0,
-        "sell_value" : 0,
-        "sell_date" : '',
-        "buy_sell_days_diff" : 0,
-        "percentage_benefit" : 0
-    }
-    print(f"📝 Adding new row: {new_row}")
-    return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    # Loop through each row in the transactions dataframe
+    for idx, row in df_transactions.iterrows():
+        symbol = row['symbol']
+        buy_value = row['buy_value']
+        
+        # Skip if already sold
+        if pd.notna(row.get('sell_value')):
+            continue
+        
+        # Look for the symbol in the analysis dataframe
+        analysis_row = df_analysis[df_analysis['symbol'] == symbol]
+        
+        if not analysis_row.empty:
+            current_price = analysis_row.iloc[0]['current_price']
+            target_price = buy_value * (1 + revenue_percentage)
+            
+            if current_price >= target_price:
+                sell_date = datetime.today().date()
+                buy_date = pd.to_datetime(row['buy_date']).date()
+                days_diff = (sell_date - buy_date).days
+                percentage_benefit = ((current_price - buy_value) / buy_value) * 100
 
-def save_dataframe(df):
-    # Save the updated DataFrame back to Google Drive as a CSV file
+                # Update the transaction record
+                df_transactions.at[idx, 'sell_value'] = round(current_price, 2)
+                df_transactions.at[idx, 'sell_date'] = sell_date
+                df_transactions.at[idx, 'buy_sell_days_diff'] = days_diff
+                df_transactions.at[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
+
+    return df_transactions
+
+
+def save_dataframe_file_id(df, file_id):
+    """
+    Updates an existing CSV file on Google Drive using in-memory upload (no temp file).
+    Fully Windows-compatible.
+    """
     service = get_drive_service()
-    file_id = os.environ.get("GDRIVE_FILE_ID")
+    logger.info("saving data into google drive...")
+
     if not file_id:
-        raise Exception("Environment variable GDRIVE_FILE_ID not found")
-    temp_csv = "temp_data.csv"
-    df.to_csv(temp_csv, index=False)
-    media = MediaFileUpload(temp_csv, mimetype='text/csv')
+        raise Exception("❌ file_id not provided or environment variable GDRIVE_FILE_ID is missing.")
+
+    # Write CSV to an in-memory bytes buffer
+    csv_buffer = io.BytesIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)  # Rewind to start
+
+    media = MediaIoBaseUpload(csv_buffer, mimetype='text/csv')
+
     updated_file = service.files().update(
         fileId=file_id,
         media_body=media
     ).execute()
-    os.remove(temp_csv)
-    print(f"💾 CSV saved to Google Drive, file ID: {updated_file['id']}, total rows: {len(df)}")
+

@@ -9,8 +9,6 @@ from datetime import datetime, timedelta
 import yfinance as yf
 from dotenv import load_dotenv
 
-# Set up logging configuration
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load .env file only if not running in production (e.g., GitHub Actions)
@@ -134,11 +132,11 @@ def parse_data(data_dict):
                     'close': float, 'volume': int
                 })
 
-            logger.info(f"Parsed data successfully from source: {source}")
+            logger.info(f"✅ Succesfully parsed hist data from source: {source}")
             return df
 
         except Exception as e:
-            logger.error(f"Error parsing data from {source}: {e}")
+            logger.error(f"❌ Error parsing data from {source}: {e}")
 
     return None
 
@@ -154,7 +152,7 @@ def get_historical_data(symbol: str, force_source: str = None):
     Returns:
         Parsed DataFrame or None
     """
-    logger.info(f"Fetching historical data for: {symbol}")
+    logger.info(f"Gathering historical data for: {symbol}")
     session = requests.Session()
     session.verify = False  # Disabled certificate verification (for testing or insecure environments)
     data_dict = {}
@@ -180,7 +178,7 @@ def get_historical_data(symbol: str, force_source: str = None):
             data = sources["alpha"]()
             if data:
                 data_dict["alpha"] = data
-
+    
     # Parse and return result if any data was fetched
     return parse_data(data_dict) if data_dict else None
 
