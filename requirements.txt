@@ -9,3 +9,4 @@ logging
 httpx
 openai
 python-dotenv
+yfinance
