@@ -18,9 +18,13 @@ def test_get_drive_service_real():
     Real test connecting to Google Drive service using real credentials from .env.
     """
     # Reload .env on every run
-    env = dotenv_values(env_path)  # Assumes test/ is sibling to .env
-    os.environ["GDRIVE_CREDENTIALS_JSON"] = env.get("GDRIVE_CREDENTIALS_JSON", "")
-    os.environ["GDRIVE_FILE_ID"] = env.get("GDRIVE_FILE_ID", "")
+    if os.getenv("GITHUB_ACTIONS") != "true":
+        env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.env"))
+        env = dotenv_values(env_path)
+        os.environ.update(env)
+
+    os.environ["GDRIVE_CREDENTIALS_JSON"] = os.environ.get("GDRIVE_CREDENTIALS_JSON", "")
+    os.environ["GDRIVE_FILE_ID"] = os.environ.get("GDRIVE_FILE_ID", "")
 
     assert os.environ["GDRIVE_CREDENTIALS_JSON"], "GDRIVE_CREDENTIALS_JSON is not set"
     assert os.environ["GDRIVE_FILE_ID"], "GDRIVE_FILE_ID is not set"
@@ -36,8 +40,8 @@ def test_load_data_real():
     Real test loading CSV data from Google Drive using real credentials from .env.
     """
     env = dotenv_values(env_path)
-    os.environ["GDRIVE_CREDENTIALS_JSON"] = env.get("GDRIVE_CREDENTIALS_JSON", "")
-    os.environ["GDRIVE_FILE_ID"] = env.get("GDRIVE_FILE_ID", "")
+    os.environ["GDRIVE_CREDENTIALS_JSON"] = os.environ.get("GDRIVE_CREDENTIALS_JSON", "")
+    os.environ["GDRIVE_FILE_ID"] = os.environ.get("GDRIVE_FILE_ID", "")
 
     assert os.environ["GDRIVE_CREDENTIALS_JSON"], "GDRIVE_CREDENTIALS_JSON is not set"
     assert os.environ["GDRIVE_FILE_ID"], "GDRIVE_FILE_ID is not set"
