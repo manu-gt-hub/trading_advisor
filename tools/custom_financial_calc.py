@@ -1,6 +1,9 @@
 
 import pandas as pd
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
     """
@@ -61,28 +64,32 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
 
 def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -> dict:
     """
-    Evaluates whether to BUY, HOLD, or SELL a stock based on technical indicators.
+    Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators.
 
     Parameters:
-        symbol (str): Stock symbol
-        df (pd.DataFrame): Historical data containing at least 'date' and 'close'
-        current_price (float): Latest stock price
+        symbol (str): Stock symbol.
+        df (pd.DataFrame): Historical stock data containing at least 'date' and 'close' columns.
 
     Returns:
-        dict: Analysis including decision, signals, and raw indicator values
+        dict: A dictionary with the evaluation decision, active signals, and raw indicator values.
     """
-    print(f"Evaluating interest for {symbol}...")
 
+    logger.info(f"evaluating buy interest for: {symbol}")
     try:
+        # Ensure the DataFrame is clean and usable
         df = df.copy()
         df['date'] = pd.to_datetime(df['date'])
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
+
+        # Require at least 200 data points for proper indicator calculation
+        if len(df) < 200:
+            raise ValueError("Insufficient data: at least 200 rows required.")
 
         # Calculate moving averages
         df["ma50"] = df["close"].rolling(window=50).mean()
         df["ma200"] = df["close"].rolling(window=200).mean()
 
-        # RSI calculation
+        # RSI (Relative Strength Index) calculation
         delta = df["close"].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -91,17 +98,17 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         rs = avg_gain / avg_loss
         df["rsi"] = 100 - (100 / (1 + rs))
 
-        # MACD
+        # MACD (Moving Average Convergence Divergence)
         ema_12 = df["close"].ewm(span=12, adjust=False).mean()
         ema_26 = df["close"].ewm(span=26, adjust=False).mean()
         df["macd"] = ema_12 - ema_26
         df["signal_line"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-        # Get last 2 rows for signal comparisons
+        # Extract the last two rows for signal analysis
         latest = df.iloc[-1]
         previous = df.iloc[-2]
 
-        # Prepare raw signal values
+        # Prepare raw signal values for output
         signals_dict = {
             "ma50": latest["ma50"],
             "ma200": latest["ma200"],
@@ -113,11 +120,12 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "current_price": current_price
         }
 
+        # Initialize counters and signal list
         active_signals = []
         buy_signals = 0
         sell_signals = 0
 
-        # MA crossover
+        # Moving Average crossover: Bullish if MA50 > MA200
         if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
             if latest["ma50"] > latest["ma200"]:
                 active_signals.append("✅ Bullish trend (MA50 > MA200)")
@@ -126,22 +134,22 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ Bearish trend (MA50 < MA200)")
                 sell_signals += 1
 
-        # RSI
+        # RSI signal interpretation
         if pd.notna(latest["rsi"]):
             rsi = latest["rsi"]
             if 40 < rsi < 70:
                 active_signals.append(f"✅ RSI in healthy range ({rsi:.2f})")
                 buy_signals += 1
             elif rsi < 30:
-                active_signals.append(f"❌ RSI oversold ({rsi:.2f})")
-                sell_signals += 1
+                active_signals.append(f"✅ RSI oversold ({rsi:.2f})")
+                buy_signals += 1
             elif rsi > 80:
                 active_signals.append(f"❌ RSI overbought ({rsi:.2f})")
                 sell_signals += 1
             else:
                 active_signals.append(f"⚠️ RSI neutral ({rsi:.2f})")
 
-        # MACD crossover
+        # MACD crossover signals
         if all(pd.notna([previous["macd"], previous["signal_line"], latest["macd"], latest["signal_line"]])):
             if previous["macd"] < previous["signal_line"] and latest["macd"] > latest["signal_line"]:
                 active_signals.append("✅ MACD bullish crossover")
@@ -150,7 +158,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ MACD bearish crossover")
                 sell_signals += 1
 
-        # Final decision
+        # Final decision based on signal majority
         if buy_signals > sell_signals:
             decision = "✅ BUY"
         elif sell_signals > buy_signals:
@@ -166,9 +174,10 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         }
 
     except Exception as e:
+        logger.error("❌ evaluation buy interest failed: {e}")
         return {
             "symbol": symbol,
             "evaluation": "⚠️ Evaluation failed",
-            "active_signals": ["failed"],
+            "active_signals": ["Evaluation failed due to error."],
             "signals": {"error": str(e)}
         }

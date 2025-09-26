@@ -23,6 +23,54 @@ Welcome to this example repository demonstrating how to deploy and run a Large L
    git clone https://github.com/manu-gt-hub/llm_deployment_test.git
    cd llm_deployment_test
 
+### Useful commands
+
+   ```bash
+   # 1. Run all tests
+   pytest
+
+   # 2. Run tests with verbose output
+   pytest -v
+
+   # 3. Run tests showing logs at INFO level
+   pytest --log-cli-level=INFO
+
+   # 4. Run tests showing logs at DEBUG level
+   pytest --log-cli-level=DEBUG
+
+   # 5. Run a specific test file
+   pytest tests/test_google_handler.py
+
+   # 6. Run a specific test function inside a test file
+   pytest tests/test_google_handler.py::test_load_data_real
+
+   # 7. Run tests and stop after first failure
+   pytest -x
+
+   # 8. Run tests with coverage report (requires pytest-cov)
+   pytest --cov=your_package_name
+
+   # 9. Run the main Python script
+   python main.py
+
+   # 10. Run main script overriding environment variable (Linux/macOS)
+   TRADING_ADVISOR_FOLDER_ID='your_folder_id' python main.py
+
+   # Windows CMD
+   set TRADING_ADVISOR_FOLDER_ID=your_folder_id
+   python main.py
+
+   # 11. Run pytest setting LOG_LEVEL environment variable
+   LOG_LEVEL=DEBUG pytest
+
+   # Windows CMD
+   set LOG_LEVEL=DEBUG
+   pytest
+
+   # 12. Run tests and generate JUnit XML report (for CI)
+   pytest --junitxml=reports/junit.xml
+   ```
+
 ### Documentation
 
 For detailed setup guides, architecture overview, and advanced usage, check out the /docs folder.
