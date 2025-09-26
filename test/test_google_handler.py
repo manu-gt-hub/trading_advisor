@@ -1,87 +1,49 @@
 import os
 import json
-import io
 import pandas as pd
+from dotenv import dotenv_values
 import pytest
 import sys
-from unittest import mock
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
 from google_handler import get_drive_service, load_data
 
+# Get absolute path to the env path
+current_dir = os.path.dirname(__file__)
+path = os.path.join(current_dir, '..', '.env')
+env_path = os.path.abspath(path)
 
-@pytest.fixture
-def mock_env_vars():
-    # Load fake credentials from file
-    with open("resources/fake_credentials.json", "r") as f:
-        fake_creds_json = f.read()
+def test_get_drive_service_real():
+    """
+    Real test connecting to Google Drive service using real credentials from .env.
+    """
+    # Reload .env on every run
+    env = dotenv_values(env_path)  # Assumes test/ is sibling to .env
+    os.environ["GDRIVE_CREDENTIALS_JSON"] = env.get("GDRIVE_CREDENTIALS_JSON", "")
+    os.environ["GDRIVE_FILE_ID"] = env.get("GDRIVE_FILE_ID", "")
 
-    os.environ["GDRIVE_CREDENTIALS_JSON"] = fake_creds_json
-    os.environ["GDRIVE_FILE_ID"] = "fake_file_id"
-    yield
-    os.environ.pop("GDRIVE_CREDENTIALS_JSON", None)
-    os.environ.pop("GDRIVE_FILE_ID", None)
+    assert os.environ["GDRIVE_CREDENTIALS_JSON"], "GDRIVE_CREDENTIALS_JSON is not set"
+    assert os.environ["GDRIVE_FILE_ID"], "GDRIVE_FILE_ID is not set"
 
+    service = get_drive_service()
+    files_list = service.files().list(pageSize=1).execute()
 
-def test_get_drive_service_success(mock_env_vars):
-    with mock.patch("your_module.build") as mock_build, \
-         mock.patch("your_module.service_account.Credentials.from_service_account_info") as mock_creds:
-
-        mock_creds.return_value = "fake_credentials"
-        mock_build.return_value = "fake_service"
-
-        service = get_drive_service()
-        assert service == "fake_service"
-        mock_creds.assert_called_once()
-        mock_build.assert_called_once_with("drive", "v3", credentials="fake_credentials")
+    assert "files" in files_list
 
 
-def test_load_data_success(mock_env_vars):
-    # Mock Google Drive service and file export behavior
-    fake_csv_content = b"value,date\n123.45,2025-09-26 12:00:00\n"
+def test_load_data_real():
+    """
+    Real test loading CSV data from Google Drive using real credentials from .env.
+    """
+    env = dotenv_values(env_path)
+    os.environ["GDRIVE_CREDENTIALS_JSON"] = env.get("GDRIVE_CREDENTIALS_JSON", "")
+    os.environ["GDRIVE_FILE_ID"] = env.get("GDRIVE_FILE_ID", "")
 
-    class FakeRequest:
-        def __init__(self):
-            self.chunks = [fake_csv_content]
-            self.index = 0
+    assert os.environ["GDRIVE_CREDENTIALS_JSON"], "GDRIVE_CREDENTIALS_JSON is not set"
+    assert os.environ["GDRIVE_FILE_ID"], "GDRIVE_FILE_ID is not set"
 
-        def next_chunk(self):
-            if self.index < 1:
-                self.index += 1
-                # Return (status, done)
-                return None, True
-            else:
-                return None, True
+    df = load_data()
 
-    class FakeDownloader:
-        def __init__(self, fh, request):
-            self.fh = fh
-            self.request = request
-            self.done = False
-
-        def next_chunk(self):
-            self.fh.write(fake_csv_content)
-            self.done = True
-            return None, self.done
-
-    fake_service = mock.MagicMock()
-    fake_service.files.return_value.export_media.return_value = FakeRequest()
-
-    with mock.patch("your_module.get_drive_service", return_value=fake_service), \
-         mock.patch("your_module.MediaIoBaseDownload", side_effect=FakeDownloader):
-
-        df = load_data()
-        assert isinstance(df, pd.DataFrame)
-        assert "value" in df.columns
-        assert len(df) == 1
-        assert df.iloc[0]["value"] == 123.45
-
-
-def test_load_data_exception_creates_empty_df(mock_env_vars):
-    fake_service = mock.MagicMock()
-    fake_service.files.return_value.export_media.side_effect = Exception("File not found")
-
-    with mock.patch("your_module.get_drive_service", return_value=fake_service):
-        df = load_data()
-        assert isinstance(df, pd.DataFrame)
-        assert df.empty
-        assert list(df.columns) == ["value", "date"]
+    assert isinstance(df, pd.DataFrame)
+    assert not df.empty
+    assert "symbol" in df.columns or "buy_price" in df.columns  

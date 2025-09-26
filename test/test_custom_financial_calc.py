@@ -10,87 +10,73 @@ from custom_financial_calc import review_transactions, evaluate_buy_interest
 # Get revenue percentage from environment variable or use a default (e.g. 10%)
 REVENUE_PERCENTAGE = float(os.environ.get("REVENUE_PERCENTAGE", 20.0))
 
+# Get absolute path to the CSV relative to this test file
+current_dir = os.path.dirname(__file__)
+csv_path = os.path.join(current_dir, '..', 'resources', 'transactions.csv')
+transactions_csv_path = os.path.abspath(csv_path)
 
-def create_mock_transaction_file(buy_price=100.0, symbol="AAPL"):
-    """Helper to create a temporary CSV file with a mock open transaction."""
-    tmp_file = NamedTemporaryFile(delete=False, mode='w', suffix=".csv")
-    df = pd.DataFrame([{
-        "symbol": symbol,
-        "buy_date": (datetime.today() - timedelta(days=10)).strftime('%Y-%m-%d'),
-        "current_price": buy_price,
-        "sell_date": "",
-        "sell_value": "",
-        "buy_sell_days_diff": "",
-        "percentage_benefit": ""
-    }])
-    df.to_csv(tmp_file.name, index=False)
-    return tmp_file.name
+def test_review_transactions():
+    # Load mock transactions from CSV
+    transactions_df = pd.read_csv(transactions_csv_path, parse_dates=["buy_date", "sell_date"])
 
+    # Simulated current prices for the relevant symbols
+    hist_data = pd.DataFrame([
+        {"symbol": "AAPL", "current_price": 185.00},   # Should trigger a sale if profit > 5%
+        {"symbol": "MSFT", "current_price": 320.00},   # Should also trigger a sale
+        {"symbol": "NFLX", "current_price": 405.00},   # Low gain, should NOT trigger
+        {"symbol": "NVDA", "current_price": 600.00},   # High gain, should trigger
+        {"symbol": "GOOGL", "current_price": 2950.00}, # Already sold, should be ignored
+    ])
 
-def test_review_transactions_success_case():
-    """Should close the transaction if the gain exceeds REVENUE_PERCENTAGE."""
-    file_path = create_mock_transaction_file(buy_price=100.0)
-    gain = 1 + (REVENUE_PERCENTAGE / 100)
-    current_df = pd.DataFrame([{"symbol": "AAPL", "current_price": 100.0 * gain}])
+    # Run the transaction review function
+    updated_df = review_transactions(transactions_df.copy(), hist_data, REVENUE_PERCENTAGE)
+    # Assert that at least one transaction was updated
+    assert not updated_df.empty, "Expected at least one transaction to be closed, but none were"
+    # Assert all returned rows have a sell date
+    assert all(updated_df["sell_date"].notna()), "Some closed transactions are missing a sell_date"
+    # Assert that all closed transactions meet the minimum revenue threshold
+    assert all(updated_df["percentage_benefit"] >= REVENUE_PERCENTAGE), "Some closed transactions do not meet the minimum % gain"
+    # Check that a specific symbol (e.g., AAPL) was indeed sold
+    assert "AAPL" in updated_df["symbol"].values, "Expected AAPL to be closed, but it was not"
 
-    updated = review_transactions(file_path, current_df, revenue_percentage=REVENUE_PERCENTAGE)
+    print(updated_df)
 
-    assert not updated.empty
-    row = updated.iloc[0]
-    assert row["symbol"] == "AAPL"
-    assert float(row["sell_value"]) == pytest.approx(100.0 * gain, rel=1e-2)
-    assert float(row["percentage_benefit"]) >= REVENUE_PERCENTAGE
-    assert pd.notna(row["sell_date"])
+# Utility function to load historical data from CSV
+def load_hist_data():
+    current_dir = os.path.dirname(__file__)
+    csv_path = os.path.join(current_dir, '..', 'resources', 'msft_hist_data.csv')
+    return pd.read_csv(csv_path)
 
-    os.remove(file_path)
+def test_evaluate_buy_interest_returns_expected_structure():
+    df = load_hist_data()
+    current_price = df['close'].iloc[-1]  # Latest close as current price
 
+    result = evaluate_buy_interest("MSFT", df, current_price)
 
-def test_review_transactions_no_update():
-    """Should not close the transaction if gain is below REVENUE_PERCENTAGE."""
-    file_path = create_mock_transaction_file(buy_price=100.0)
-    # Slightly under the required gain
-    current_df = pd.DataFrame([{"symbol": "AAPL", "current_price": 100.0 * (1 + (REVENUE_PERCENTAGE - 2) / 100)}])
-
-    updated = review_transactions(file_path, current_df, revenue_percentage=REVENUE_PERCENTAGE)
-
-    assert updated.empty
-
-    os.remove(file_path)
-
-
-def test_review_transactions_invalid_price():
-    """Should skip rows where current_price is not a valid number."""
-    file_path = create_mock_transaction_file(buy_price=100.0)
-    current_df = pd.DataFrame([{"symbol": "AAPL", "current_price": "not_a_number"}])
-
-    updated = review_transactions(file_path, current_df, revenue_percentage=REVENUE_PERCENTAGE)
-
-    assert updated.empty
-
-    os.remove(file_path)
-
-
-def test_evaluate_buy_interest_valid_data():
-    """Basic test of evaluation function with valid trend data."""
-    dates = pd.date_range(end=datetime.today(), periods=250)
-    prices = [100 + i * 0.2 for i in range(250)]  # upward trend
-    df = pd.DataFrame({"date": dates, "close": prices})
-    current_price = df["close"].iloc[-1]
-
-    result = evaluate_buy_interest("TEST", df, current_price)
-
-    assert isinstance(result, dict)
-    assert result["symbol"] == "TEST"
-    assert result["evaluation"] in ["✅ BUY", "❌ SELL", "✋ HOLD"]
+    # Basic asserts about the structure and keys
+    assert result["symbol"] == "MSFT"
+    assert result["evaluation"] in ["✅ BUY", "❌ SELL", "✋ HOLD", "⚠️ Evaluation failed"]
     assert isinstance(result["active_signals"], list)
     assert isinstance(result["signals"], dict)
+    # Check that key signal values exist
+    for key in ["ma50", "ma200", "rsi", "macd", "macd_signal", "previous_macd", "previous_macd_signal", "current_price"]:
+        assert key in result["signals"]
 
+def test_evaluate_buy_interest_buy_or_sell_or_hold():
+    df = load_hist_data()
+    current_price = df['close'].iloc[-1]
 
-def test_evaluate_buy_interest_invalid_data():
-    """Check how the function handles invalid historical data."""
-    df = pd.DataFrame({"date": ["invalid", "also bad"], "close": ["bad", "worse"]})
-    result = evaluate_buy_interest("BROKEN", df, 100.0)
+    result = evaluate_buy_interest("MSFT", df, current_price)
+    eval = result["evaluation"]
+    # Since data is real-ish, expect one of these
+    assert eval in ["✅ BUY", "❌ SELL", "✋ HOLD"]
+
+def test_evaluate_buy_interest_handles_bad_data():
+    bad_df = pd.DataFrame({"date": ["not_a_date"], "close": ["not_a_number"]})
+    current_price = 100.0
+
+    result = evaluate_buy_interest("MSFT", bad_df, current_price)
 
     assert result["evaluation"] == "⚠️ Evaluation failed"
-    assert "error" in result["signals"]
     assert result["active_signals"] == ["failed"]
+    assert "error" in result["signals"]

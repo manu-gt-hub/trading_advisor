@@ -2,7 +2,7 @@
 import pandas as pd
 from datetime import datetime
 
-def review_transactions(path: str, df: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
+def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
     """
     Reviews active transactions and closes those that meet the required revenue percentage.
 
@@ -14,8 +14,6 @@ def review_transactions(path: str, df: pd.DataFrame, revenue_percentage: float) 
     Returns:
         pd.DataFrame: Rows that were updated (sold)
     """
-    # Load existing transactions from CSV
-    transactions_df = pd.read_csv(path)
 
     # Ensure buy/sell dates are datetime
     transactions_df['buy_date'] = pd.to_datetime(transactions_df['buy_date'], errors='coerce')
@@ -23,7 +21,7 @@ def review_transactions(path: str, df: pd.DataFrame, revenue_percentage: float) 
 
     updated_rows = []
 
-    for _, row in df.iterrows():
+    for _, row in hist_data.iterrows():
         symbol = row['symbol']
         try:
             current_price = float(row['current_price'])
@@ -58,9 +56,6 @@ def review_transactions(path: str, df: pd.DataFrame, revenue_percentage: float) 
         transactions_df.loc[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
 
         updated_rows.append(transactions_df.loc[idx])
-
-    # Save updated transactions
-    transactions_df.to_csv(path, index=False)
 
     return pd.DataFrame(updated_rows)
 

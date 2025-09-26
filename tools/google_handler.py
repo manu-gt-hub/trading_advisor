@@ -54,8 +54,14 @@ def add_row(df):
     now_madrid = datetime.now(ZoneInfo("Europe/Madrid"))
     
     new_row = {
-        "value": 143.23,
-        "date": now_madrid.strftime("%Y-%m-%d %H:%M:%S")
+        "symbol" : "",
+        "current_price" : 0,
+        "buy_date" : '', 
+        "amount" : 0,
+        "sell_value" : 0,
+        "sell_date" : '',
+        "buy_sell_days_diff" : 0,
+        "percentage_benefit" : 0
     }
     print(f"📝 Adding new row: {new_row}")
     return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
