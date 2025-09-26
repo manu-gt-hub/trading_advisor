@@ -10,6 +10,15 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
+      ALPHA_VANTAGE_URL: ${{ secrets.ALPHA_VANTAGE_URL }}
+      ALPHA_API_KEY: ${{ secrets.ALPHA_API_KEY }}
+      GDRIVE_FILE_ID: ${{ secrets.GDRIVE_FILE_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      REVENUE_PERCENTAGE: ${{ vars.REVENUE_PERCENTAGE }}      
+      SYMBOLS_INTEREST_LIST: ${{ vars.SYMBOLS_INTEREST_LIST }}      
+      MAILING_LIST: ${{ vars.MAILING_LIST }}      
 
     steps:
       - name: Checkout repository
