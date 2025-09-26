@@ -12,3 +12,5 @@ env/
 
 # VS Code settings
 .vscode/
+
+resources/credentials
