@@ -1,5 +1,5 @@
 import os
-from helpers.utils import cargar_o_crear_dataframe, añadir_fila, guardar_dataframe
+from tools.google_handler import load_data, add_row, save_dataframe
 
 def main():
     # SECRET AREA
@@ -19,7 +19,7 @@ def main():
 
     # CSV AREA
     print("🔧 Creando DataFrame inicial...")
-    df = cargar_o_crear_dataframe()
+    df = load_dataframe()
     
     print("➕ Añadiendo nueva fila...")
     df = añadir_fila(df)

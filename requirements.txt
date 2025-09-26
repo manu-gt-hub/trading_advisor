@@ -1,3 +1,9 @@
 pandas
 google-api-python-client
 google-auth
+pytest
+requests
+logging
+httpx
+openai
+python-dotenv

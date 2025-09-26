@@ -8,7 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
-def obtener_servicio_drive():
+def get_drive_service():
     creds_json = os.environ.get("GDRIVE_CREDENTIALS_JSON")
     if not creds_json:
         raise Exception("No se encontró la variable de entorno GDRIVE_CREDENTIALS_JSON")
@@ -19,8 +19,8 @@ def obtener_servicio_drive():
     service = build("drive", "v3", credentials=credentials)
     return service
 
-def cargar_o_crear_dataframe():
-    service = obtener_servicio_drive()
+def load_data():
+    service = get_drive_service()
     file_id = os.environ.get("GDRIVE_FILE_ID")
     if not file_id:
         raise Exception("No se encontró la variable de entorno GDRIVE_FILE_ID")
@@ -47,7 +47,7 @@ def cargar_o_crear_dataframe():
     return df
 
 
-def añadir_fila(df):
+def add_row(df):
     now_madrid = datetime.now(ZoneInfo("Europe/Madrid"))
     
     nueva_fila = {
@@ -57,8 +57,8 @@ def añadir_fila(df):
     print(f"📝 Añadiendo nueva fila: {nueva_fila}")
     return pd.concat([df, pd.DataFrame([nueva_fila])], ignore_index=True)
 
-def guardar_dataframe(df):
-    service = obtener_servicio_drive()
+def save_dataframe(df):
+    service = get_drive_service()
     file_id = os.environ.get("GDRIVE_FILE_ID")
     if not file_id:
         raise Exception("No se encontró la variable de entorno GDRIVE_FILE_ID")
