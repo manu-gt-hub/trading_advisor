@@ -18,13 +18,15 @@ jobs:
       FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
       TRADING_ADVISOR_FOLDER_ID: ${{ secrets.FINNHUB_API_KEY }}
       BUY_RECOMMENDATIONS_ID: ${{ secrets.BUY_RECOMMENDATIONS_ID }}
+      ANALYSIS_FILE_ID : ${{ secrets.ANALYSIS_FILE_ID }}
       
       ALPHA_VANTAGE_URL: ${{ vars.ALPHA_VANTAGE_URL }}
       REVENUE_PERCENTAGE: ${{ vars.REVENUE_PERCENTAGE }}      
       SYMBOLS_INTEREST_LIST: ${{ vars.SYMBOLS_INTEREST_LIST }}      
       MAILING_LIST: ${{ vars.MAILING_LIST }}
       GOOGLE_FINANCE_LOSERS_URL: ${{ vars.GOOGLE_FINANCE_LOSERS_URL }}   
-      LOG_LEVEL:  ${{ vars.LOG_LEVEL }}   
+      LOG_LEVEL:  ${{ vars.LOG_LEVEL }} 
+      FORCE_OPINION: ${{ vars.FORCE_OPINION }}     
        
 
     steps:

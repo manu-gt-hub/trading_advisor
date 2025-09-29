@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 't
 from web_scrapper import *
 
 def test_get_trading_view_opinion():
-    symbol = "AAPL"
+    symbol = "MSFT"
     opinion = get_trading_view_opinion(symbol)
 
     assert isinstance(opinion, str), "Expected opinion as string"

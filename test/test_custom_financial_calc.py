@@ -53,7 +53,7 @@ def test_evaluate_buy_interest_returns_expected_structure():
 
     # Basic asserts about the structure and keys
     assert result["symbol"] == "MSFT"
-    assert result["evaluation"] in ["✅ BUY", "❌ SELL", "✋ HOLD", "⚠️ Evaluation failed"]
+    assert result["evaluation"] in ["BUY", "SELL", "HOLD", "Evaluation failed"]
     assert isinstance(result["active_signals"], list)
     assert isinstance(result["signals"], dict)
     # Check that key signal values exist
@@ -67,7 +67,7 @@ def test_evaluate_buy_interest_buy_or_sell_or_hold():
     result = evaluate_buy_interest("MSFT", df, current_price)
     eval = result["evaluation"]
     # Since data is real-ish, expect one of these
-    assert eval in ["✅ BUY", "❌ SELL", "✋ HOLD"]
+    assert eval in ["BUY", "SELL", "HOLD"]
 
 def test_evaluate_buy_interest_handles_bad_data():
 
@@ -82,6 +82,6 @@ def test_evaluate_buy_interest_handles_bad_data():
     result = evaluate_buy_interest("MSFT", bad_df, current_price)
 
     # Assert the function handles the error gracefully
-    assert result["evaluation"] == "⚠️ Evaluation failed"
+    assert result["evaluation"] == "Evaluation failed"
     assert result["active_signals"] == ["Evaluation failed due to error."]
     assert "error" in result["signals"]

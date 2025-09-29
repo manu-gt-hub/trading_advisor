@@ -72,20 +72,19 @@ def get_symbol_history_from_alpha(symbol: str, days: int):
         return None
 
 
-def get_hist_data_from_yahoo(symbol: str, session: requests.Session, period: str = "5Y"):
+def get_hist_data_from_yahoo(symbol: str, period: str = "5Y"):
     """
     Fetch historical stock data using Yahoo Finance via yfinance.
 
     Parameters:
         symbol (str): Stock symbol
-        session (requests.Session): Reusable session object
         period (str): Period string for yfinance (e.g., '5Y')
 
     Returns:
         DataFrame with stock data or None if data is missing or failed
     """
     try:
-        ticker = yf.Ticker(symbol, session=session)
+        ticker = yf.Ticker(symbol)  
         data = ticker.history(period=period)
 
         if data.empty:
@@ -159,7 +158,7 @@ def get_historical_data(symbol: str, force_source: str = None):
 
     # Mapping available sources to functions
     sources = {
-        "yahoo": lambda: get_hist_data_from_yahoo(symbol, session),
+        "yahoo": lambda: get_hist_data_from_yahoo(symbol),
         "alpha": lambda: get_symbol_history_from_alpha(symbol, 1825)
     }
 
@@ -167,17 +166,17 @@ def get_historical_data(symbol: str, force_source: str = None):
     if force_source:
         logger.info(f"Forcing data source: {force_source}")
         data = sources.get(force_source, lambda: None)()
-        if data:
+        if data is not None:
             data_dict[force_source] = data
     else:
-        # Try Yahoo first, fallback to Alpha
-        data = sources["yahoo"]()
+        # Try Alpha first, fallback to yahoo
+        data = sources["alpha"]()
         if data:
-            data_dict["yahoo"] = data
+            data_dict["alpha"] = data
         else:
-            data = sources["alpha"]()
-            if data:
-                data_dict["alpha"] = data
+            data = sources["yahoo"]()
+            if (data is not None) and (not data.empty()):
+                data_dict["yahoo"] = data
     
     # Parse and return result if any data was fetched
     return parse_data(data_dict) if data_dict else None

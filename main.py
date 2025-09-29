@@ -13,7 +13,7 @@ if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
     load_dotenv()
 
 def main():
-
+    
     # Set up logging configuration
     log_level_str = os.getenv("LOG_LEVEL").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
@@ -21,12 +21,16 @@ def main():
     logging.basicConfig(level=log_level)
     logger = logging.getLogger(__name__)
 
-    symbol_list = ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST", "[]"))
+    interest_symbol_list = ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST"))
     revenue_percentage =os.environ.get("REVENUE_PERCENTAGE")
     
-    top_losers_data = finnhub_client.analyze_market_losers_from_interest_list(symbol_list)
+    symbols_info_list = finnhub_client.get_symbols_info(interest_symbol_list)
 
-    analysis_df = pd.DataFrame(top_losers_data)
+    # by now we evaluate all the symbols, not just the losers
+    #top_losers_data = finnhub_client.analyze_market_losers_from_interest_list(symbols_info_list)
+    top_losers_data = symbols_info_list
+
+    analysis_df = pd.DataFrame(top_losers_data)    
 
     for loser in top_losers_data:
 
@@ -51,14 +55,16 @@ def main():
             general.add_opinion(symbol,analysis_df,"llm_opinion","error: metrics not provided")
     
     # generate and filter by decision column where is BUY
-    analysis_df = general.generate_decision_column(analysis_df)
+    analysis_df = general.generate_decision_column(analysis_df, os.environ.get("FORCE_OPINION"))
     buy_df = analysis_df[analysis_df['decision'] == 'BUY']   
 
     # update transaction log
     transactions_file_id = os.environ.get("GDRIVE_FILE_ID")
 
+    update_df = pd.DataFrame(symbols_info_list)
+
     transactions_df = google_handler.load_data(transactions_file_id)    
-    trans_updated_df = google_handler.update_transactions(analysis_df,transactions_df, revenue_percentage)
+    trans_updated_df = google_handler.update_transactions(update_df,transactions_df, revenue_percentage)
 
     final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
                     .sort_values(by='buy_date', ascending=False).head(365)
@@ -80,6 +86,9 @@ def main():
 
     buy_file_id = os.environ.get("BUY_RECOMMENDATIONS_ID")
     google_handler.save_dataframe_file_id(buy_df,buy_file_id)
+
+    anlysis_file_id = os.environ.get("ANALYSIS_FILE_ID")
+    google_handler.save_dataframe_file_id(analysis_df,anlysis_file_id)
 
     
 if __name__ == "__main__":
