@@ -7,18 +7,18 @@ logger = logging.getLogger(__name__)
 
 def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
     """
-    Reviews active transactions and closes those that meet the required revenue percentage.
+    Reviews open transactions and closes those that meet or exceed the required revenue percentage.
 
     Parameters:
-        path (str): CSV file path containing transactions
-        df (pd.DataFrame): DataFrame with updated symbol and current_price
-        revenue_percentage (float): Minimum profit percentage to trigger a sale
+        transactions_df (pd.DataFrame): DataFrame of transactions with columns like 'symbol', 'buy_date', 'buy_price', etc.
+        hist_data (pd.DataFrame): DataFrame with symbols and current prices (columns: 'symbol', 'current_price').
+        revenue_percentage (float): Minimum profit percentage to trigger a sale.
 
     Returns:
-        pd.DataFrame: Rows that were updated (sold)
+        pd.DataFrame: Rows of transactions that were updated (i.e., sold).
     """
 
-    # Ensure buy/sell dates are datetime
+    # Ensure date columns are parsed correctly
     transactions_df['buy_date'] = pd.to_datetime(transactions_df['buy_date'], errors='coerce')
     transactions_df['sell_date'] = pd.to_datetime(transactions_df['sell_date'], errors='coerce')
 
@@ -29,9 +29,9 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
         try:
             current_price = float(row['current_price'])
         except ValueError:
-            continue  # Skip rows with invalid prices
+            continue  # Skip rows with invalid price
 
-        # Find first open transaction for this symbol
+        # Find the first open (unsold) transaction for the symbol
         open_tx = transactions_df[
             (transactions_df['symbol'] == symbol) & (transactions_df['sell_date'].isna())
         ]
@@ -40,18 +40,18 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
             continue
 
         idx = open_tx.index[0]
-        buy_value = pd.to_numeric(transactions_df.at[idx, 'current_price'], errors='coerce')
 
-        if pd.isna(buy_value):
+        buy_price = pd.to_numeric(transactions_df.at[idx, 'buy_price'], errors='coerce')
+        if pd.isna(buy_price):
             continue
 
-        # Calculate % benefit
-        percentage_benefit = ((current_price - buy_value) / buy_value) * 100
+        # Calculate profit percentage
+        percentage_benefit = ((current_price - buy_price) / buy_price) * 100
 
         if percentage_benefit < revenue_percentage:
             continue
 
-        # Fill sale details
+        # Close the transaction (register sale)
         sell_date = datetime.today()
         transactions_df.loc[idx, 'sell_date'] = sell_date.strftime('%Y-%m-%d')
         transactions_df.loc[idx, 'sell_value'] = current_price
@@ -62,6 +62,7 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
 
     return pd.DataFrame(updated_rows)
 
+
 def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -> dict:
     """
     Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators.
@@ -69,27 +70,26 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
     Parameters:
         symbol (str): Stock symbol.
         df (pd.DataFrame): Historical stock data containing at least 'date' and 'close' columns.
+        current_price (float): The stock's current market price.
 
     Returns:
         dict: A dictionary with the evaluation decision, active signals, and raw indicator values.
     """
 
-    logger.info(f"evaluating buy interest for: {symbol}")
+    logger.info(f"Evaluating buy interest for: {symbol}")
     try:
-        # Ensure the DataFrame is clean and usable
         df = df.copy()
         df['date'] = pd.to_datetime(df['date'])
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
 
-        # Require at least 200 data points for proper indicator calculation
         if len(df) < 200:
             raise ValueError("Insufficient data: at least 200 rows required.")
 
-        # Calculate moving averages
+        # Technical indicators
         df["ma50"] = df["close"].rolling(window=50).mean()
         df["ma200"] = df["close"].rolling(window=200).mean()
 
-        # RSI (Relative Strength Index) calculation
+        # RSI (Relative Strength Index)
         delta = df["close"].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -104,11 +104,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         df["macd"] = ema_12 - ema_26
         df["signal_line"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-        # Extract the last two rows for signal analysis
+        # Extract the two most recent rows for crossover analysis
         latest = df.iloc[-1]
         previous = df.iloc[-2]
 
-        # Prepare raw signal values for output
+        # Collect raw indicator values
         signals_dict = {
             "ma50": latest["ma50"],
             "ma200": latest["ma200"],
@@ -120,12 +120,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "current_price": current_price
         }
 
-        # Initialize counters and signal list
         active_signals = []
         buy_signals = 0
         sell_signals = 0
 
-        # Moving Average crossover: Bullish if MA50 > MA200
+        # Signal: Moving Average Crossover
         if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
             if latest["ma50"] > latest["ma200"]:
                 active_signals.append("✅ Bullish trend (MA50 > MA200)")
@@ -134,7 +133,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ Bearish trend (MA50 < MA200)")
                 sell_signals += 1
 
-        # RSI signal interpretation
+        # Signal: RSI level
         if pd.notna(latest["rsi"]):
             rsi = latest["rsi"]
             if 40 < rsi < 70:
@@ -149,7 +148,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             else:
                 active_signals.append(f"⚠️ RSI neutral ({rsi:.2f})")
 
-        # MACD crossover signals
+        # Signal: MACD crossover
         if all(pd.notna([previous["macd"], previous["signal_line"], latest["macd"], latest["signal_line"]])):
             if previous["macd"] < previous["signal_line"] and latest["macd"] > latest["signal_line"]:
                 active_signals.append("✅ MACD bullish crossover")
@@ -158,13 +157,13 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ MACD bearish crossover")
                 sell_signals += 1
 
-        # Final decision based on signal majority
+        # Final decision based on signal count
         if buy_signals > sell_signals:
-            decision = "✅ BUY"
+            decision = "BUY"
         elif sell_signals > buy_signals:
-            decision = "❌ SELL"
+            decision = "SELL"
         else:
-            decision = "✋ HOLD"
+            decision = "HOLD"
 
         return {
             "symbol": symbol,
@@ -174,10 +173,10 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         }
 
     except Exception as e:
-        logger.error("❌ evaluation buy interest failed: {e}")
+        logger.error(f"❌ Evaluation failed for {symbol}: {e}")
         return {
             "symbol": symbol,
-            "evaluation": "⚠️ Evaluation failed",
+            "evaluation": "Evaluation failed",
             "active_signals": ["Evaluation failed due to error."],
             "signals": {"error": str(e)}
         }

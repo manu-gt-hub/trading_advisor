@@ -7,6 +7,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def check_llm_env():
+    if not os.getenv("OPENAI_API_KEY"):
+        logger.error("OPENAI_API_KEY is not defined in the environment.")
+
+    if not os.getenv('LLM_MODEL_NAME') :
+        logger.error("LLM_MODEL_NAME is not defined in the environment.")
+
+    if not os.getenv('REVENUE_PERCENTAGE') :
+        logger.warning("REVENUE_PERCENTAGE is not defined")
+
 if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
     load_dotenv()
 
@@ -26,6 +36,7 @@ def get_llm_signals_analysis(signals, symbol, current_price):
     Returns:
     - LLM-generated text recommendation or error message string
     """
+    check_llm_env()
 
     model_name = os.getenv('LLM_MODEL_NAME') 
     revenue_percentage = os.getenv('REVENUE_PERCENTAGE') 
@@ -46,7 +57,10 @@ def get_llm_signals_analysis(signals, symbol, current_price):
     )
 
     try:
-        openai = OpenAI(http_client=httpx.Client(verify=False))
+        openai = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            http_client=httpx.Client(verify=False)
+        )
         llm_temperature = 0.1
 
         messages_prompt = [

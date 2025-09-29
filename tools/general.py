@@ -37,6 +37,11 @@ def extract_llm_decision(opinion):
         return None
     return opinion.split('-')[0].strip().upper()  # Returns 'SELL', 'BUY', etc.
 
+def extract_custom_decision(opinion):
+    if not isinstance(opinion, str):
+        return None
+    return opinion.split(' ')[1].strip().upper()  # Returns 'SELL', 'BUY', etc.
+
 # Function to decide final action based on both opinions
 def decide_final_action(tv_decision, llm_decision):
     if tv_decision is None or llm_decision is None:
@@ -47,19 +52,36 @@ def decide_final_action(tv_decision, llm_decision):
         return 'HOLD'
     
 
-def generate_decision_column(df: pd.DataFrame) -> pd.DataFrame:
+def generate_decision_column(df: pd.DataFrame, force_opinion: str = "") -> pd.DataFrame:
     """
     Adds a 'decision' column to the DataFrame based on matching logic
-    between 'trading_view_opinion' and 'llm_op'.
+    between 'trading_view_opinion' and 'llm_opinion'.
 
     Parameters:
-        df (pd.DataFrame): DataFrame containing 'trading_view_opinion' and 'llm_op' columns.
+        df (pd.DataFrame): DataFrame containing 'trading_view_opinion' and 'llm_opinion' columns.
+        force_opinion (str): Optionally force decision source: "LLM", "TV", or "CUSTOM".
 
     Returns:
-        pd.DataFrame: Original DataFrame with 'tv_decision', 'llm_decision', and 'decision' columns added.
+        pd.DataFrame: Original DataFrame with 'decision' column added.
     """
-    df['tv_decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
-    df['llm_decision'] = df['llm_opinion'].apply(extract_llm_decision)
-    df['decision'] = df.apply(lambda row: decide_final_action(row['tv_decision'], row['llm_decision']), axis=1)
-    df = df.drop(columns=['tv_decision', 'llm_decision'])
+    # Clean force_opinion input
+    force_opinion = force_opinion.upper()
+
+    if force_opinion == "TV":
+        df['decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
+
+    elif force_opinion == "LLM":
+        df['decision'] = df['llm_opinion'].apply(extract_llm_decision)
+
+    elif force_opinion == "CUSTOM":
+        df['decision'] = df['manual_financial_analysis'].apply(extract_custom_decision)
+
+    else:  # Default logic: compare both and apply decision logic
+        df['tv_decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
+        df['llm_decision'] = df['llm_opinion'].apply(extract_llm_decision)
+        df['decision'] = df.apply(
+            lambda row: decide_final_action(row['tv_decision'], row['llm_decision']), axis=1
+        )
+        df = df.drop(columns=['tv_decision', 'llm_decision'])
+
     return df
