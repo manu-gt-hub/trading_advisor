@@ -63,6 +63,13 @@ def main():
 
     update_df = pd.DataFrame(symbols_info_list)
 
+    # get Madrid time
+    madrid_tz = pytz.timezone('Europe/Madrid')
+    now_madrid = datetime.now(madrid_tz)
+
+    buy_df['buy_date'] = now_madrid
+    buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
+
     transactions_df = google_handler.load_data(transactions_file_id)    
     trans_updated_df = google_handler.update_transactions(update_df,transactions_df, revenue_percentage)
 
@@ -71,15 +78,11 @@ def main():
     
     google_handler.save_dataframe_file_id(final_df,transactions_file_id)
 
-    # get Madrid time
-    madrid_tz = pytz.timezone('Europe/Madrid')
-    now_madrid = datetime.now(madrid_tz)
 
-    buy_df['recommendation_date'] = now_madrid
 
     # if dataframe is empty we create at least 1 row to control that the process is being executed
     if buy_df.empty:
-        empty_row = {col: (now_madrid if col == 'recommendation_date' else np.nan) for col in buy_df.columns}
+        empty_row = {col: (now_madrid if col == 'buy_date' else np.nan) for col in buy_df.columns}
         empty_df = pd.DataFrame([empty_row])
         buy_df = pd.concat([buy_df, empty_df], ignore_index=True)
 

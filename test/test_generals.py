@@ -69,7 +69,7 @@ def test_decide_final_action():
 # Test: generate_decision_column (default logic)
 def test_generate_decision_column_default():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy())
+    df_result = generate_decision_column(df_test.copy(), "")
 
     expected = ['SELL', 'BUY', 'HOLD', 'HOLD', 'NEUTRAL']
     for i, exp in enumerate(expected):
@@ -78,7 +78,7 @@ def test_generate_decision_column_default():
 # Test: generate_decision_column with force_opinion = LLM
 def test_generate_decision_column_force_llm():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy(), force_opinion="LLM")
+    df_result = generate_decision_column(df_test.copy(), opinion_type="LLM")
 
     expected = ['SELL', 'BUY', 'NEUTRAL', 'SELL', 'NEUTRAL']
     for i, exp in enumerate(expected):
@@ -87,7 +87,7 @@ def test_generate_decision_column_force_llm():
 # Test: generate_decision_column with force_opinion = TV
 def test_generate_decision_column_force_tv():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy(), force_opinion="TV")
+    df_result = generate_decision_column(df_test.copy(), opinion_type="TV")
 
     expected = ['SELL', 'BUY', 'SELL', 'BUY', 'NEUTRAL']
     for i, exp in enumerate(expected):
