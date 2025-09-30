@@ -55,7 +55,7 @@ def decide_final_action(tv_decision, llm_decision):
         return 'HOLD'
     
 
-def generate_decision_column(df: pd.DataFrame, force_opinion: str) -> pd.DataFrame:
+def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     """
     Adds a 'decision' column to the DataFrame based on matching logic
     between 'trading_view_opinion' and 'llm_opinion'.
@@ -68,16 +68,16 @@ def generate_decision_column(df: pd.DataFrame, force_opinion: str) -> pd.DataFra
         pd.DataFrame: Original DataFrame with 'decision' column added.
     """
     # Clean force_opinion input
-    force_opinion = force_opinion.upper()
-    logger.info(f"Forcing decision: {force_opinion}")
+    opinion_type = opinion_type.upper()
+    logger.debug(f"Opinion type: {opinion_type}")
 
-    if force_opinion == "TV":
+    if opinion_type == "TV":
         df['decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
 
-    elif force_opinion == "LLM":
+    elif opinion_type == "LLM":
         df['decision'] = df['llm_opinion'].apply(extract_llm_decision)
 
-    elif force_opinion == "CUSTOM":
+    elif opinion_type == "CUSTOM":
         df['decision'] = df['manual_financial_analysis'].apply(extract_custom_decision)
 
     else:  # Default logic: compare both and apply decision logic
