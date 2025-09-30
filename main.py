@@ -65,7 +65,7 @@ def main():
 
     # get Madrid time
     madrid_tz = pytz.timezone('Europe/Madrid')
-    now_madrid = now_madrid.strftime("%Y-%m-%d %H:%M")
+    now_madrid = madrid_tz .strftime("%Y-%m-%d %H:%M")
 
     buy_df['buy_date'] = now_madrid
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
@@ -77,8 +77,6 @@ def main():
                     .sort_values(by='buy_date', ascending=False).head(365)
     
     google_handler.save_dataframe_file_id(final_df,transactions_file_id)
-
-
 
     # if dataframe is empty we create at least 1 row to control that the process is being executed
     if buy_df.empty:
