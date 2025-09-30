@@ -38,7 +38,7 @@ def get_llm_signals_analysis(signals, symbol, current_price):
     """
     check_llm_env()
 
-    model_name = os.getenv('LLM_MODEL_NAME') 
+    model_name = os.getenv('LLM_MODEL_NAME', 'gpt-4o') 
     revenue_percentage = os.getenv('REVENUE_PERCENTAGE') 
     
     logger.info(f"Calling LLM model {model_name}...")
