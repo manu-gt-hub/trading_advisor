@@ -57,6 +57,7 @@ jobs:
           MAILING_LIST: ${{ vars.MAILING_LIST }}
           GOOGLE_FINANCE_LOSERS_URL: ${{ vars.GOOGLE_FINANCE_LOSERS_URL }}  
           LOG_LEVEL:  ${{ vars.LOG_LEVEL }}   
-          FORCE_OPINION: ${{ vars.FORCE_OPINION }}   
+          FORCE_OPINION: ${{ vars.FORCE_OPINION }} 
+          LLM_MODEL_NAME: ${{ vars.LLM_MODEL_NAME }} 
             
         run: python main.py
