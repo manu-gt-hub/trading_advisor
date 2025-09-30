@@ -65,7 +65,7 @@ def main():
 
     # get Madrid time
     madrid_tz = pytz.timezone('Europe/Madrid')
-    now_madrid = madrid_tz .strftime("%Y-%m-%d %H:%M")
+    now_madrid = datetime.now(madrid_tz).strftime("%Y-%m-%d %H:%M")
 
     buy_df['buy_date'] = now_madrid
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
