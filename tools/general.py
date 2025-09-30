@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 def add_opinion(symbol,df,new_column_name,opinion):
     df.loc[df['symbol'] == symbol, new_column_name] = opinion
@@ -52,7 +55,7 @@ def decide_final_action(tv_decision, llm_decision):
         return 'HOLD'
     
 
-def generate_decision_column(df: pd.DataFrame, force_opinion: str = "") -> pd.DataFrame:
+def generate_decision_column(df: pd.DataFrame, force_opinion: str) -> pd.DataFrame:
     """
     Adds a 'decision' column to the DataFrame based on matching logic
     between 'trading_view_opinion' and 'llm_opinion'.
@@ -66,6 +69,7 @@ def generate_decision_column(df: pd.DataFrame, force_opinion: str = "") -> pd.Da
     """
     # Clean force_opinion input
     force_opinion = force_opinion.upper()
+    logger.info(f"Forcing decision: {force_opinion}")
 
     if force_opinion == "TV":
         df['decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
