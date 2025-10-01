@@ -73,7 +73,7 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
         
         if not analysis_row.empty:
             current_price = analysis_row.iloc[0]['current_price']
-            target_price = buy_value * (1 + revenue_percentage)
+            target_price = buy_value * (1 + float(revenue_percentage) / 100)
             
             if current_price >= target_price:
                 sell_date = datetime.today().date()
