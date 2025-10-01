@@ -77,6 +77,6 @@ def get_llm_signals_analysis(signals, symbol, current_price):
         return response.choices[0].message.content
 
     except Exception as e:
-        error_msg = f"Error while getting LLM analysis for symbol {symbol}: {e}"
+        error_msg = f"Error getting LLM analysis for {symbol}: {e}"
         logger.error(error_msg)
         return error_msg

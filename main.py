@@ -3,94 +3,105 @@ import ast
 import os
 import pandas as pd
 import logging
-from tools import google_handler,finnhub_client,historicals,web_scrapper,custom_financial_calc as cfc,general,llms
-from datetime import datetime
+from tools import google_handler, finnhub_client, historicals, web_scrapper, custom_financial_calc as cfc, general, llms
 import numpy as np
-import pytz  # o usa zoneinfo si estás en Python 3.9+
 
-# Load .env file only if not running in production (e.g., GitHub Actions)
-if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
-    load_dotenv()
 
-def main():
+def load_config():
+    """Load environment variables and set up logging."""
+    if not os.getenv("GITHUB_ACTIONS"):
+        load_dotenv()
     
-    # Set up logging configuration
-    log_level_str = os.getenv("LOG_LEVEL").upper()
+    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
-
+    
     logging.basicConfig(level=log_level)
     logger = logging.getLogger(__name__)
-
-    interest_symbol_list = ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST"))
-    revenue_percentage =os.environ.get("REVENUE_PERCENTAGE")
     
-    symbols_info_list = finnhub_client.get_symbols_info(interest_symbol_list)
+    return {
+        "logger": logger,
+        "symbols_interest_list": ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST", "[]")),
+        "revenue_percentage": os.environ.get("REVENUE_PERCENTAGE"),
+        "max_records": int(os.environ.get("TRANSACTIONS_MAX_RECORDS", 100)),
+        "transactions_file_id": os.environ.get("GDRIVE_FILE_ID"),
+        "buy_file_id": os.environ.get("BUY_RECOMMENDATIONS_ID"),
+        "analysis_file_id": os.environ.get("ANALYSIS_FILE_ID"),
+        "force_opinion": os.environ.get("FORCE_OPINION"),
+    }
 
-    # by now we evaluate all the symbols, not just the losers
-    #top_losers_data = finnhub_client.analyze_market_losers_from_interest_list(symbols_info_list)
-    top_losers_data = symbols_info_list
+def analyze_symbol(symbol_data):
+    """Analyze a single stock symbol."""
+    symbol = symbol_data['symbol']
+    current_price = symbol_data['current_price']
 
-    analysis_df = pd.DataFrame(top_losers_data)    
+    hist_data = historicals.get_historical_data(symbol)
+    metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price)
+    td_opinion = web_scrapper.get_trading_view_opinion(symbol)
 
-    for loser in top_losers_data:
+    return {
+        "symbol": symbol,
+        "current_price": current_price,
+        "metrics": metrics,
+        "td_opinion": td_opinion
+    }
 
-        symbol=loser['symbol']
-        current_price=loser['current_price']
-        # get historical data        
-        hist_data = historicals.get_historical_data(symbol)
-        
-        # get interest metrics
-        metrics = cfc.evaluate_buy_interest(symbol,hist_data,current_price)
+def enrich_analysis_df(df, analysis, force_opinion):
+    """Add analysis opinions to the DataFrame."""
+    for item in analysis:
+        symbol = item["symbol"]
+        metrics = item["metrics"]
+        td_opinion = item["td_opinion"]
 
-        # get trading view opinion
-        td_opinion = web_scrapper.get_trading_view_opinion(symbol)
-
-        # add opinions
-        general.add_opinion(symbol,analysis_df,"manual_financial_analysis",metrics["evaluation"])
-        general.add_opinion(symbol,analysis_df,"trading_view_opinion",td_opinion)
+        general.add_opinion(symbol, df, "manual_financial_analysis", metrics["evaluation"])
+        general.add_opinion(symbol, df, "trading_view_opinion", td_opinion)
 
         if "failed" not in metrics["evaluation"]:
-            general.add_opinion(symbol,analysis_df,"llm_opinion",llms.get_llm_signals_analysis( metrics["signals"],symbol,current_price))
+            llm_opinion = llms.get_llm_signals_analysis(metrics["signals"], symbol, item["current_price"])
         else:
-            general.add_opinion(symbol,analysis_df,"llm_opinion","error: metrics not provided")
-    
-    # generate and filter by decision column where is BUY
-    analysis_df = general.generate_decision_column(analysis_df, os.environ.get("FORCE_OPINION"))
-    buy_df = analysis_df[analysis_df['decision'] == 'BUY']   
+            llm_opinion = "error: metrics not provided"
 
-    # update transaction log
-    transactions_file_id = os.environ.get("GDRIVE_FILE_ID")
+        general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
 
-    update_df = pd.DataFrame(symbols_info_list)
+    return general.generate_decision_column(df, force_opinion)
 
-    # get Madrid time
-    madrid_tz = pytz.timezone('Europe/Madrid')
-    now_madrid = datetime.now(madrid_tz).strftime("%Y-%m-%d %H:%M")
+def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
+    transactions_df = google_handler.load_data(config["transactions_file_id"])
+    update_df = pd.DataFrame(analysis_df)
 
-    buy_df['buy_date'] = now_madrid
-    buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
-
-    transactions_df = google_handler.load_data(transactions_file_id)    
-    trans_updated_df = google_handler.update_transactions(update_df,transactions_df, revenue_percentage)
+    trans_updated_df = google_handler.update_transactions(update_df, transactions_df, config["revenue_percentage"])
 
     final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
-                    .sort_values(by='buy_date', ascending=False).head(365)
-    
-    google_handler.save_dataframe_file_id(final_df,transactions_file_id)
+                 .sort_values(by='buy_date', ascending=False).head(config["max_records"])
 
-    # if dataframe is empty we create at least 1 row to control that the process is being executed
-    if buy_df.empty:
-        empty_row = {col: (now_madrid if col == 'buy_date' else np.nan) for col in buy_df.columns}
-        empty_df = pd.DataFrame([empty_row])
-        buy_df = pd.concat([buy_df, empty_df], ignore_index=True)
+    google_handler.save_dataframe_file_id(final_df, config["transactions_file_id"])
 
+def save_outputs(buy_df, analysis_df, config):
+    google_handler.save_dataframe_file_id(buy_df, config["buy_file_id"])
+    google_handler.save_dataframe_file_id(analysis_df, config["analysis_file_id"])
 
-    buy_file_id = os.environ.get("BUY_RECOMMENDATIONS_ID")
-    google_handler.save_dataframe_file_id(buy_df,buy_file_id)
+def main():
+    config = load_config()
+    now_madrid = general.get_current_time_madrid()
 
-    anlysis_file_id = os.environ.get("ANALYSIS_FILE_ID")
-    google_handler.save_dataframe_file_id(analysis_df,anlysis_file_id)
+    symbols_info_list = finnhub_client.get_symbols_info(config["symbols_interest_list"])
+    analysis_df = pd.DataFrame(symbols_info_list)
 
-    
+    # Analyze each symbol and collect analysis results
+    analysis_results = [analyze_symbol(data) for data in symbols_info_list]
+
+    # Enrich analysis_df with opinions
+    analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])
+
+    # Filter to only BUY recommendations
+    buy_df = analysis_df[analysis_df['decision'] == 'BUY'].copy()
+    buy_df['buy_date'] = now_madrid
+    buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
+    buy_date_col = buy_df.pop('buy_date')
+    buy_df.insert(2, 'buy_date', buy_date_col)
+
+    # Update and save all outputs
+    update_and_save_transactions(config, symbols_info_list, buy_df, now_madrid)
+    save_outputs(buy_df, analysis_df, config)
+
 if __name__ == "__main__":
     main()

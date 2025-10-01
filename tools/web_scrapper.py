@@ -74,8 +74,9 @@ def get_trading_view_opinion(symbol):
 
         html = get_html(urls)
         if not html:
-            logger.error(f"❌ [{symbol}] No HTML found.")
-            return None
+            msg = f"❌ [{symbol}] No HTML found."
+            logger.error(msg)
+            return f"error: {msg}"
 
         soup = BeautifulSoup(html, 'lxml')
         opinion_divs = soup.find_all('div', class_=lambda x: x and 'speedometerWrapper' in x)

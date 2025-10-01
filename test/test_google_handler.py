@@ -86,7 +86,7 @@ def test_update_transactions():
     })
 
     # Set target profit (10%)
-    revenue_percentage = 0.1  # 10%
+    revenue_percentage = 10  
 
     # Call the function
     from datetime import date

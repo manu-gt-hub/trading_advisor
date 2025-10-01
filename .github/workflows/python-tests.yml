@@ -27,7 +27,8 @@ jobs:
       GOOGLE_FINANCE_LOSERS_URL: ${{ vars.GOOGLE_FINANCE_LOSERS_URL }}   
       LOG_LEVEL:  ${{ vars.LOG_LEVEL }} 
       FORCE_OPINION: ${{ vars.FORCE_OPINION }}   
-      LLM_MODEL_NAME: ${{ vars.LLM_MODEL_NAME }} 
+      LLM_MODEL_NAME: ${{ vars.LLM_MODEL_NAME }}
+      TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}      
        
 
     steps:

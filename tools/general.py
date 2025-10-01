@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import re
 import logging
+from datetime import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -89,3 +91,7 @@ def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFram
         df = df.drop(columns=['tv_decision', 'llm_decision'])
 
     return df
+
+def get_current_time_madrid():
+    madrid_tz = pytz.timezone('Europe/Madrid')
+    return datetime.now(madrid_tz).strftime("%Y-%m-%d %H:%M")
