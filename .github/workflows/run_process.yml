@@ -2,9 +2,9 @@ name: run process
 
 on:
   schedule:
-    - cron: '30 5 * * *'  # 6:30 AM Madrid in winter, 7:30 AM in summer
+    - cron: '0 6 * * *'  # 7:00 AM Madrid in winter, 8:00 AM in summer
     - cron: '0 12 * * *' # 13:00 winter, 14:00 in summer
-    - cron: '0 18 * * *' # 19:00 in winter, 20:00 in summer
+    - cron: '0 16 * * *' # 17:00 in winter, 18:00 in summer
 
   workflow_dispatch:
 
