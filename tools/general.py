@@ -51,14 +51,19 @@ def extract_custom_decision(opinion):
 def decide_final_action(tv_decision, llm_decision):
     error_values = [None, 'error']
 
-    if tv_decision == llm_decision:
+    # If both decisions are the same and valid, return it
+    if tv_decision == llm_decision and (tv_decision not in error_values) and (llm_decision not in error_values):
         return tv_decision
+    # If TV is invalid but LLM is valid, return LLM
     elif tv_decision in error_values and llm_decision not in error_values:
         return llm_decision
+    # If LLM is invalid but TV is valid, return TV
     elif llm_decision in error_values and tv_decision not in error_values:
         return tv_decision
+    # Otherwise, no clear decision
     else:
         return 'EMPTY_DECISION'
+
     
 
 def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
