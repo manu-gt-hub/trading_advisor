@@ -193,7 +193,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         logger.error(f"❌ Evaluation failed for {symbol}: {e}")
         return {
             "symbol": symbol,
-            "evaluation": "evaluation failed",
+            "evaluation": "EVALUATION_FAILED",
             "active_signals": ["Evaluation failed due to error."],
             "signals": {"error": str(e)}
         }
