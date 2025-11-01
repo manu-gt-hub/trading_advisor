@@ -53,12 +53,35 @@ def test_evaluate_buy_interest_returns_expected_structure():
 
     # Basic asserts about the structure and keys
     assert result["symbol"] == "MSFT"
-    assert result["evaluation"] in ["BUY", "SELL", "HOLD", "Evaluation failed"]
+
+    # evaluation should now be in lowercase
+    assert result["evaluation"] in ["buy", "sell", "hold", "evaluation failed"]
+
+    # Confidence score should be a float between -1 and 1
+    assert isinstance(result["confidence"], float)
+    assert -1.0 <= result["confidence"] <= 1.0
+
+    # Active signals should be a list
     assert isinstance(result["active_signals"], list)
+    assert all(isinstance(sig, str) for sig in result["active_signals"])
+
+    # Signals should be a dictionary with expected keys
     assert isinstance(result["signals"], dict)
-    # Check that key signal values exist
-    for key in ["ma50", "ma200", "rsi", "macd", "macd_signal", "previous_macd", "previous_macd_signal", "current_price"]:
+    for key in [
+        "SMA_50",
+        "SMA_200",
+        "RSI",
+        "MACD",
+        "MACD_Signal",
+        "MACD_Hist",
+        "MA50_Slope",
+        "Current_Price"
+    ]:
         assert key in result["signals"]
+
+    # Sanity check: Current_Price should match the input
+    assert result["signals"]["Current_Price"] == current_price
+
 
 def test_evaluate_buy_interest_buy_or_sell_or_hold():
     df = load_hist_data()
