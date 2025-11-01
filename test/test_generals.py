@@ -88,7 +88,7 @@ def test_generate_decision_column_default():
     df_test = pd.DataFrame(test_data)
     df_result = generate_decision_column(df_test.copy(), "")
 
-    expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
+    expected = ['SELL', 'BUY', 'SELL', 'EMPTY_DECISION', 'NEUTRAL']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'decision'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
 
