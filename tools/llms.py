@@ -47,9 +47,10 @@ def get_llm_signals_analysis(signals, symbol, current_price):
     metrics = "\n".join([f"{signal} = {value}" for signal, value in signals.items()]) + "\n"
 
     prompt = (
-        f"Return me a clear answer about the provided symbol and the following metrics taken from its historical data: {metrics}"
+        f"Return me a clear answer about the provided symbol and the following metrics taken from its historical data: {metrics} "
         f"Take a look at the indicators: SMA_50, SMA_200, RSI, MACD, MACD_Signal, MACD_Hist. "
-        f"My intention when buying is to get a profit of around {revenue_percentage}% within the next month. "
+        f"My goal is to identify short-term (1–4 weeks) bullish setups with strong upward momentum, "
+        f"potentially capable of yielding around {revenue_percentage}% profit if the trend continues. "
         f"The answer has to be: 'sell', 'hold', 'buy', or 'empty decision' "
         f"(in case there is no clear decision or insufficient input data), "
         f"and a brief explanation in a few words (max. 20). "
