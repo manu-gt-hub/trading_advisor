@@ -55,7 +55,7 @@ def test_evaluate_buy_interest_returns_expected_structure():
     assert result["symbol"] == "MSFT"
 
     # evaluation should now be in lowercase
-    assert result["evaluation"] in ["buy", "sell", "hold", "evaluation failed"]
+    assert result["evaluation"] in ["BUY", "SELL", "HOLD", "EVALUATION_FAILED"]
 
     # Confidence score should be a float between -1 and 1
     assert isinstance(result["confidence"], float)
