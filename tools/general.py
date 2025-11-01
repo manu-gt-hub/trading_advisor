@@ -49,7 +49,7 @@ def extract_custom_decision(opinion):
 
 # Function to decide final action based on both opinions
 def decide_final_action(tv_decision, llm_decision):
-    error_values = [None, 'error', 'EMPTY_DECISION']
+    error_values = [None, 'error']
 
     if tv_decision == llm_decision:
         return tv_decision
