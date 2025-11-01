@@ -105,6 +105,6 @@ def test_evaluate_buy_interest_handles_bad_data():
     result = evaluate_buy_interest("MSFT", bad_df, current_price)
 
     # Assert the function handles the error gracefully
-    assert result["evaluation"] == "Evaluation failed"
+    assert result["evaluation"] == "EVALUATION_FAILED"
     assert result["active_signals"] == ["Evaluation failed due to error."]
     assert "error" in result["signals"]
