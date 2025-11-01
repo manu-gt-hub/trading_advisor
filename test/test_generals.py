@@ -57,14 +57,28 @@ def test_extract_llm_decision():
 
 # Test: decide_final_action
 def test_decide_final_action():
+    # Same decisions → return that decision
     assert decide_final_action('SELL', 'SELL') == 'SELL'
     assert decide_final_action('BUY', 'BUY') == 'BUY'
     assert decide_final_action('NEUTRAL', 'NEUTRAL') == 'NEUTRAL'
-    assert decide_final_action('SELL', 'BUY') == 'HOLD'
-    assert decide_final_action('BUY', 'NEUTRAL') == 'HOLD'
-    assert decide_final_action('SELL', None) == 'HOLD'
-    assert decide_final_action(None, 'BUY') == 'HOLD'
-    assert decide_final_action(None, None) == 'HOLD'
+
+    # Different decisions → return EMPTY_DECISION
+    assert decide_final_action('SELL', 'BUY') == 'EMPTY_DECISION'
+    assert decide_final_action('BUY', 'NEUTRAL') == 'EMPTY_DECISION'
+
+    # One is None → return the other
+    assert decide_final_action('SELL', None) == 'SELL'
+    assert decide_final_action(None, 'BUY') == 'BUY'
+
+    # Both None → EMPTY_DECISION
+    assert decide_final_action(None, None) == 'EMPTY_DECISION'
+
+    # Cases with 'error'
+    assert decide_final_action('error', 'BUY') == 'BUY'
+    assert decide_final_action('SELL', 'error') == 'SELL'
+    assert decide_final_action('error', 'error') == 'EMPTY_DECISION'
+
+
 
 # Test: generate_decision_column (default logic)
 def test_generate_decision_column_default():
