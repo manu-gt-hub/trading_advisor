@@ -25,11 +25,11 @@ test_data = {
         'NEUTRAL (9) - SELL (5) - BUY (5)',      # NEUTRAL
     ],
     'llm_opinion': [
-        'sell - Price is below moving averages.',
-        'buy - All indicators show upward movement.',
-        'neutral - No strong signals detected.',
-        'sell - Momentum weakening, risk of reversal.',
-        'neutral - Sideways market, no clear signal.',
+        'SELL - Price is below moving averages.',
+        'BUY - All indicators show upward movement.',
+        'EMPTY_DECISION - No strong signals detected.',
+        'SELL - Momentum weakening, risk of reversal.',
+        'EMPTY_DECISION - Sideways market, no clear signal.',
     ]
 }
 
@@ -88,7 +88,7 @@ def test_generate_decision_column_default():
     df_test = pd.DataFrame(test_data)
     df_result = generate_decision_column(df_test.copy(), "")
 
-    expected = ['SELL', 'BUY', 'HOLD', 'HOLD', 'NEUTRAL']
+    expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'decision'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
 
