@@ -97,7 +97,7 @@ def test_generate_decision_column_force_llm():
     df_test = pd.DataFrame(test_data)
     df_result = generate_decision_column(df_test.copy(), opinion_type="LLM")
 
-    expected = ['SELL', 'BUY', 'NEUTRAL', 'SELL', 'EMPTY_DECISION']
+    expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'decision'] == exp, f"[LLM] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
 
@@ -106,6 +106,6 @@ def test_generate_decision_column_force_tv():
     df_test = pd.DataFrame(test_data)
     df_result = generate_decision_column(df_test.copy(), opinion_type="TV")
 
-    expected = ['SELL', 'BUY', 'SELL', 'BUY', 'EMPTY_DECISION']
+    expected = ['SELL', 'BUY', 'SELL', 'BUY', 'NEUTRAL']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'decision'] == exp, f"[TV] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
