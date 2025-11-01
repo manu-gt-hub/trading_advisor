@@ -172,11 +172,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
 
         # Final decision based on signal count
         if buy_signals > sell_signals:
-            decision = "buy"
+            decision = "BUY"
         elif sell_signals > buy_signals:
-            decision = "sell"
+            decision = "SELL"
         else:
-            decision = "hold"
+            decision = "HOLD"
 
         # Confidence score
         confidence = (buy_signals - sell_signals) / max(buy_signals + sell_signals, 1)
