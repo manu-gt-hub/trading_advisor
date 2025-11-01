@@ -110,14 +110,13 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
 
         # Collect raw indicator values
         signals_dict = {
-            "ma50": latest["ma50"],
-            "ma200": latest["ma200"],
-            "rsi": latest["rsi"],
-            "macd": latest["macd"],
-            "macd_signal": latest["signal_line"],
-            "previous_macd": previous["macd"],
-            "previous_macd_signal": previous["signal_line"],
-            "current_price": current_price
+            "SMA_50": latest["ma50"],
+            "SMA_200": latest["ma200"],
+            "RSI": latest["rsi"],
+            "MACD": latest["macd"],
+            "MACD_Signal": latest["signal_line"],
+            "MACD_Hist": latest["macd"] - latest["signal_line"],
+            "Current_Price": current_price
         }
 
         active_signals = []
