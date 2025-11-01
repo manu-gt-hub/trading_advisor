@@ -141,7 +141,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             elif rsi < 30:
                 active_signals.append(f"✅ RSI oversold ({rsi:.2f})")
                 buy_signals += 1
-            elif rsi > 80:
+            elif rsi > 70:
                 active_signals.append(f"❌ RSI overbought ({rsi:.2f})")
                 sell_signals += 1
             else:
@@ -164,9 +164,12 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         else:
             decision = "HOLD"
 
+        confidence = (buy_signals - sell_signals) / max(buy_signals + sell_signals, 1)
+
         return {
             "symbol": symbol,
             "evaluation": decision,
+            "confidence": round(confidence, 2),
             "active_signals": active_signals,
             "signals": signals_dict
         }
