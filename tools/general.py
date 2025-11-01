@@ -49,12 +49,14 @@ def extract_custom_decision(opinion):
 
 # Function to decide final action based on both opinions
 def decide_final_action(tv_decision, llm_decision):
-    if tv_decision is None or llm_decision is None:
-        return 'HOLD'
     if tv_decision == llm_decision:
         return tv_decision
+    elif tv_decision is None and llm_decision is not None:
+        return llm_decision
+    elif tv_decision is not None and llm_decision is None:
+        return tv_decision
     else:
-        return 'HOLD'
+        return 'EMPTY_DECISION'
     
 
 def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
