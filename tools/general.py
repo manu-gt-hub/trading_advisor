@@ -49,14 +49,27 @@ def extract_custom_decision(opinion):
 
 # Function to decide final action based on both opinions
 def decide_final_action(tv_decision, llm_decision):
-    if tv_decision == llm_decision:
-        return tv_decision
-    elif (tv_decision is None or tv_decision == 'error') and llm_decision is not None:
-        return llm_decision
-    elif tv_decision is not None and (llm_decision is None or llm_decision == 'error'):
-        return tv_decision
+    """
+    Decide final action based on TradingView and LLM signals.
+
+    Rules:
+    1. If both decisions are equal → return that decision.
+    2. If one decision is None or 'error', return the other (if valid).
+    3. If both are different and valid → return 'EMPTY_DECISION'.
+    """
+    # Normalize input
+    tv = tv_decision if tv_decision != 'error' else None
+    llm = llm_decision if llm_decision != 'error' else None
+
+    if tv == llm:
+        return tv if tv is not None else 'EMPTY_DECISION'
+    elif tv is None and llm is not None:
+        return llm
+    elif tv is not None and llm is None:
+        return tv
     else:
         return 'EMPTY_DECISION'
+
     
 
 def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
