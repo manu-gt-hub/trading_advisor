@@ -57,26 +57,29 @@ def test_extract_llm_decision():
 
 # Test: decide_final_action
 def test_decide_final_action():
-    # Same decisions → return that decision
-    assert decide_final_action('SELL', 'SELL') == 'SELL'
+    # Both equal
     assert decide_final_action('BUY', 'BUY') == 'BUY'
-    assert decide_final_action('NEUTRAL', 'NEUTRAL') == 'NEUTRAL'
+    assert decide_final_action('SELL', 'SELL') == 'SELL'
+    assert decide_final_action('HOLD', 'HOLD') == 'HOLD'
 
-    # Different decisions → return EMPTY_DECISION
-    assert decide_final_action('SELL', 'BUY') == 'EMPTY_DECISION'
-    assert decide_final_action('BUY', 'NEUTRAL') == 'EMPTY_DECISION'
-
-    # One is None → return the other
-    assert decide_final_action('SELL', None) == 'SELL'
+    # One is None or error
     assert decide_final_action(None, 'BUY') == 'BUY'
+    assert decide_final_action('SELL', None) == 'SELL'
+    assert decide_final_action('error', 'HOLD') == 'HOLD'
+    assert decide_final_action('BUY', 'error') == 'BUY'
+    assert decide_final_action(None, 'error') == 'EMPTY_DECISION'
+    assert decide_final_action('error', None) == 'EMPTY_DECISION'
 
-    # Both None → EMPTY_DECISION
+    # Both different and valid
+    assert decide_final_action('BUY', 'SELL') == 'EMPTY_DECISION'
+    assert decide_final_action('SELL', 'HOLD') == 'EMPTY_DECISION'
+    assert decide_final_action('HOLD', 'BUY') == 'EMPTY_DECISION'
+
+    # Both None or error
     assert decide_final_action(None, None) == 'EMPTY_DECISION'
-
-    # Cases with 'error'
-    assert decide_final_action('error', 'BUY') == 'BUY'
-    assert decide_final_action('SELL', 'error') == 'SELL'
     assert decide_final_action('error', 'error') == 'EMPTY_DECISION'
+    assert decide_final_action(None, 'error') == 'EMPTY_DECISION'
+
 
 
 
