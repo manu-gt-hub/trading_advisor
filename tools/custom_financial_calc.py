@@ -73,7 +73,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         current_price (float): The stock's current market price.
 
     Returns:
-        dict: A dictionary with the evaluation decision, active signals, and raw indicator values.
+        dict: A dictionary with the evaluation decision, confidence, active signals, and raw indicator values.
     """
 
     logger.info(f"Evaluating buy interest for: {symbol}")
@@ -97,12 +97,16 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         avg_loss = loss.rolling(window=14).mean()
         rs = avg_gain / avg_loss
         df["rsi"] = 100 - (100 / (1 + rs))
+        df["rsi"] = df["rsi"].clip(lower=0, upper=100)  # prevent invalid RSI values
 
         # MACD (Moving Average Convergence Divergence)
         ema_12 = df["close"].ewm(span=12, adjust=False).mean()
         ema_26 = df["close"].ewm(span=26, adjust=False).mean()
         df["macd"] = ema_12 - ema_26
         df["signal_line"] = df["macd"].ewm(span=9, adjust=False).mean()
+
+        # Momentum: slope of MA50 over last 5 days
+        df["ma50_slope"] = df["ma50"].diff(5)
 
         # Extract the two most recent rows for crossover analysis
         latest = df.iloc[-1]
@@ -116,6 +120,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "MACD": latest["macd"],
             "MACD_Signal": latest["signal_line"],
             "MACD_Hist": latest["macd"] - latest["signal_line"],
+            "MA50_Slope": latest["ma50_slope"],
             "Current_Price": current_price
         }
 
@@ -156,14 +161,24 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ MACD bearish crossover")
                 sell_signals += 1
 
+        # Signal: MA50 slope (momentum)
+        if pd.notna(latest["ma50_slope"]):
+            if latest["ma50_slope"] > 0:
+                active_signals.append("📈 Positive MA50 slope (uptrend momentum)")
+                buy_signals += 0.5
+            elif latest["ma50_slope"] < 0:
+                active_signals.append("📉 Negative MA50 slope (downtrend momentum)")
+                sell_signals += 0.5
+
         # Final decision based on signal count
         if buy_signals > sell_signals:
-            decision = "BUY"
+            decision = "buy"
         elif sell_signals > buy_signals:
-            decision = "SELL"
+            decision = "sell"
         else:
-            decision = "HOLD"
+            decision = "hold"
 
+        # Confidence score
         confidence = (buy_signals - sell_signals) / max(buy_signals + sell_signals, 1)
 
         return {
@@ -178,7 +193,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         logger.error(f"❌ Evaluation failed for {symbol}: {e}")
         return {
             "symbol": symbol,
-            "evaluation": "Evaluation failed",
+            "evaluation": "evaluation failed",
             "active_signals": ["Evaluation failed due to error."],
             "signals": {"error": str(e)}
         }
