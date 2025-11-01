@@ -51,9 +51,9 @@ def extract_custom_decision(opinion):
 def decide_final_action(tv_decision, llm_decision):
     if tv_decision == llm_decision:
         return tv_decision
-    elif tv_decision is None and llm_decision is not None:
+    elif (tv_decision is None or tv_decission == 'error') and llm_decision is not None:
         return llm_decision
-    elif tv_decision is not None and llm_decision is None:
+    elif tv_decision is not None and (llm_decision is None or llm_decision == 'error'):
         return tv_decision
     else:
         return 'EMPTY_DECISION'
