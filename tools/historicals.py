@@ -175,7 +175,7 @@ def get_historical_data(symbol: str, force_source: str = None):
             data_dict["alpha"] = data
         else:
             data = sources["yahoo"]()
-            if (data is not None) and (not data.empty()):
+            if (data is not None) and (not data.empty):
                 data_dict["yahoo"] = data
     
     # Parse and return result if any data was fetched
