@@ -86,7 +86,7 @@ def test_decide_final_action():
 # Test: generate_decision_column (default logic)
 def test_generate_decision_column_default():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy(), "")
+    df_result = generate_decision_column(df_test.copy(), "DEFAULT")
 
     expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'EMPTY_DECISION', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):

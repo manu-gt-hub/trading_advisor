@@ -79,24 +79,33 @@ def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFram
         pd.DataFrame: Original DataFrame with 'decision' column added.
     """
     # Clean force_opinion input
-    opinion_type = opinion_type.upper()
+    opinion_type = opinion_type.strip().upper()
     logger.debug(f"Opinion type: {opinion_type}")
 
     if opinion_type == "TV":
+        logger.debug("set decision logic as TV")
+
         df['decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
 
     elif opinion_type == "LLM":
+        logger.debug("set decision logic as LLM")
+
         df['decision'] = df['llm_opinion'].apply(extract_llm_decision)
 
     elif opinion_type == "CUSTOM":
+        logger.debug("set decision logic as CUSTOM")
+
         df['decision'] = df['manual_financial_analysis'].apply(extract_custom_decision)
 
     else:  # Default logic: compare both and apply decision logic
+        logger.debug("set decision logic as DEFAULT")
+
         df['tv_decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
         df['llm_decision'] = df['llm_opinion'].apply(extract_llm_decision)
         df['decision'] = df.apply(
             lambda row: decide_final_action(row['tv_decision'], row['llm_decision']), axis=1
         )
+        
         df = df.drop(columns=['tv_decision', 'llm_decision'])
 
     return df
