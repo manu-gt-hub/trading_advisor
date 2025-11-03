@@ -11,7 +11,7 @@ from general import (
     extract_llm_decision,
     extract_custom_decision,
     decide_final_action,
-    generate_decision_column
+    generate_action_column
 )
 
 # Sample test data
@@ -83,29 +83,29 @@ def test_decide_final_action():
 
 
 
-# Test: generate_decision_column (default logic)
-def test_generate_decision_column_default():
+# Test: generate_action_column (default logic)
+def test_generate_action_column_default():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy(), "DEFAULT")
+    df_result = generate_action_column(df_test.copy(), "DEFAULT")
 
     expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'EMPTY_DECISION', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'decision'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
+        assert df_result.loc[i, 'action'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
-# Test: generate_decision_column with force_opinion = LLM
-def test_generate_decision_column_force_llm():
+# Test: generate_action_column with force_opinion = LLM
+def test_generate_action_column_force_llm():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy(), opinion_type="LLM")
+    df_result = generate_action_column(df_test.copy(), opinion_type="LLM")
 
     expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'decision'] == exp, f"[LLM] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
+        assert df_result.loc[i, 'action'] == exp, f"[LLM] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
-# Test: generate_decision_column with force_opinion = TV
-def test_generate_decision_column_force_tv():
+# Test: generate_action_column with force_opinion = TV
+def test_generate_action_column_force_tv():
     df_test = pd.DataFrame(test_data)
-    df_result = generate_decision_column(df_test.copy(), opinion_type="TV")
+    df_result = generate_action_column(df_test.copy(), opinion_type="TV")
 
     expected = ['SELL', 'BUY', 'SELL', 'BUY', 'NEUTRAL']
     for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'decision'] == exp, f"[TV] Index {i}: expected {exp}, got {df_result.loc[i, 'decision']}"
+        assert df_result.loc[i, 'action'] == exp, f"[TV] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"

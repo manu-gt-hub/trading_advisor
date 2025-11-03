@@ -79,6 +79,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
     logger.info(f"Evaluating buy interest for: {symbol}")
     try:
         df = df.copy()
+        df.columns = df.columns.str.lower()
         df['date'] = pd.to_datetime(df['date'])
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
 
@@ -180,6 +181,8 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
 
         # Confidence score
         confidence = (buy_signals - sell_signals) / max(buy_signals + sell_signals, 1)
+
+        logger.info(f"✅ Succesfully evaluated buy interest for: {symbol}")
 
         return {
             "symbol": symbol,

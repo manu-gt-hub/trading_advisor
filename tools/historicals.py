@@ -35,7 +35,7 @@ def get_symbol_history_from_alpha(symbol: str, days: int):
         'function': 'TIME_SERIES_DAILY',
         'symbol': symbol,
         'apikey': ALPHA_API_KEY,
-        'outputsize': 'full'
+        'outputsize': 'compact'
     }
 
     try:
@@ -115,23 +115,38 @@ def parse_data(data_dict):
             continue
 
         try:
+            df = pd.DataFrame(data).copy()
+
             if source == "yahoo":
-                # Parse and clean Yahoo Finance DataFrame
-                df = pd.DataFrame(data).copy()
+                # If the index is a DatetimeIndex, reset it
+                if isinstance(df.index, pd.DatetimeIndex):
+                    df = df.reset_index()
+                
+                # Rename the first column (dates) to 'date'
+                first_col = df.columns[0]
+                df = df.rename(columns={first_col: 'date'})
+
+                # Normalize all column names to lowercase
                 df.columns = df.columns.str.replace(' ', '').str.lower()
-                df = df.reset_index()
-                df = df.rename(columns={'index': 'date'})
+
+                # Ensure 'date' column is datetime
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
 
             elif source == "alpha":
-                # Parse Alpha Vantage data from list of dicts
-                df = pd.DataFrame(data).copy()
-                df['date'] = pd.to_datetime(df['date'])
+                # Normalize column names to lowercase
+                df.columns = df.columns.str.replace(' ', '').str.lower()
+
+                # Ensure 'date' column exists and is datetime
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+
+                # Convert numeric columns safely
                 df = df.astype({
                     'open': float, 'high': float, 'low': float,
                     'close': float, 'volume': int
-                })
+                }, errors='ignore')
 
-            logger.info(f"✅ Succesfully parsed hist data from source: {source}")
+            logger.info(f"✅ Successfully parsed historical data from source: {source} ({len(df)} rows)")
             return df
 
         except Exception as e:
@@ -142,7 +157,7 @@ def parse_data(data_dict):
 
 def get_historical_data(symbol: str, force_source: str = None):
     """
-    Entry point to fetch and parse historical stock data from available sources.
+    Fetch and parse historical stock data from available sources.
 
     Parameters:
         symbol (str): Stock symbol to query
@@ -153,10 +168,10 @@ def get_historical_data(symbol: str, force_source: str = None):
     """
     logger.info(f"Gathering historical data for: {symbol}")
     session = requests.Session()
-    session.verify = False  # Disabled certificate verification (for testing or insecure environments)
+    session.verify = False  # Disable certificate verification for testing
     data_dict = {}
 
-    # Mapping available sources to functions
+    # Map available sources to fetching functions
     sources = {
         "yahoo": lambda: get_hist_data_from_yahoo(symbol),
         "alpha": lambda: get_symbol_history_from_alpha(symbol, 1825)
@@ -169,18 +184,21 @@ def get_historical_data(symbol: str, force_source: str = None):
         if data is not None:
             data_dict[force_source] = data
     else:
-        # Try Alpha first, fallback to yahoo
-        data = sources["alpha"]()
-        if data:
-            data_dict["alpha"] = data
+        # Try Yahoo first, fallback to Alpha
+        data = sources["yahoo"]()
+        if isinstance(data, pd.DataFrame) and not data.empty:
+            data_dict["yahoo"] = data
+            logger.info(f"Data history got from YAHOO ({len(data)} rows)")
         else:
-            data = sources["yahoo"]()
-            if (data is not None) and (not data.empty):
-                data_dict["yahoo"] = data
-    
+            data = sources["alpha"]()
+            if data is not None:
+                data_dict["alpha"] = data
+                logger.info(f"Data history got from ALPHA VANTAGE ({len(data)} rows)")
+            else:
+                logger.warning("No historical data fetched from any source.")
+
     # Parse and return result if any data was fetched
     return parse_data(data_dict) if data_dict else None
-
 
 def create_hist_data():
     """

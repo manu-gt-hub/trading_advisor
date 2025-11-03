@@ -70,7 +70,7 @@ def test_update_transactions():
         'manual_financial_analysis': ['✋ HOLD', '❌ SELL'],
         'trading_view_opinion': ['BUY (10) - SELL (5)', 'SELL (12) - NEUTRAL (6)'],
         'llm_opinion': ['sell...', 'sell...'],
-        'decision': ['HOLD', 'SELL']
+        'action': ['HOLD', 'SELL']
     })
     
 
