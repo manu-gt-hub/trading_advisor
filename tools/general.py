@@ -66,9 +66,9 @@ def decide_final_action(tv_decision, llm_decision):
 
     
 
-def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
+def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     """
-    Adds a 'decision' column to the DataFrame based on matching logic
+    Adds a 'action' column to the DataFrame based on matching logic
     between 'trading_view_opinion' and 'llm_opinion'.
 
     Parameters:
@@ -76,7 +76,7 @@ def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFram
         force_opinion (str): Optionally force decision source: "LLM", "TV", or "CUSTOM".
 
     Returns:
-        pd.DataFrame: Original DataFrame with 'decision' column added.
+        pd.DataFrame: Original DataFrame with 'action' column added.
     """
     # Clean force_opinion input
     opinion_type = opinion_type.strip().upper()
@@ -85,24 +85,24 @@ def generate_decision_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFram
     if opinion_type == "TV":
         logger.debug("set decision logic as TV")
 
-        df['decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
+        df['action'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
 
     elif opinion_type == "LLM":
         logger.debug("set decision logic as LLM")
 
-        df['decision'] = df['llm_opinion'].apply(extract_llm_decision)
+        df['action'] = df['llm_opinion'].apply(extract_llm_decision)
 
     elif opinion_type == "CUSTOM":
         logger.debug("set decision logic as CUSTOM")
 
-        df['decision'] = df['manual_financial_analysis'].apply(extract_custom_decision)
+        df['action'] = df['manual_financial_analysis'].apply(extract_custom_decision)
 
     else:  # Default logic: compare both and apply decision logic
         logger.debug("set decision logic as DEFAULT")
 
         df['tv_decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
         df['llm_decision'] = df['llm_opinion'].apply(extract_llm_decision)
-        df['decision'] = df.apply(
+        df['action'] = df.apply(
             lambda row: decide_final_action(row['tv_decision'], row['llm_decision']), axis=1
         )
         

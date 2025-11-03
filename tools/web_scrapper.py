@@ -62,6 +62,10 @@ def get_html(urls):
 
 # Get TradingView's technical analysis summary (Buy/Sell/Neutral)
 def get_trading_view_opinion(symbol):
+    """
+    Fetch TradingView technical analysis summary (Buy/Sell/Neutral) for a given symbol.
+    Returns a string with the main opinion or an "error: ..." message if unavailable.
+    """
     logger.info(f"Fetching TradingView opinion for {symbol}...")
 
     try:
@@ -74,7 +78,7 @@ def get_trading_view_opinion(symbol):
 
         html = get_html(urls)
         if not html:
-            msg = f"❌ [{symbol}] No HTML found."
+            msg = f"[{symbol}] No HTML found."
             logger.error(msg)
             return f"error: {msg}"
 
@@ -88,19 +92,23 @@ def get_trading_view_opinion(symbol):
                 data = [(label, int(value)) for label, value in matches]
 
                 if not data:
-                    continue
+                    continue  # Skip if no matches found
 
+                # Pick the top signal
                 top = max(data, key=lambda x: x[1])
                 data.remove(top)
 
                 main = f"{top[0].upper()} ({top[1]})"
                 others = " - ".join([f"{label} ({value})" for label, value in data])
-                result = f"{main} - {others}"
+                result = f"{main} - {others}" if others else main
 
-                logger.info(f"✅ [{symbol}] Opinion succesfully fetched: {result}")
+                logger.info(f"✅ [{symbol}] Opinion successfully fetched: {result}")
                 return result
 
-        logger.info(f"⚠️ [{symbol}] No summary found.")
+        # No summary found in the HTML
+        msg = f"[{symbol}] No summary found on the page."
+        logger.warning(msg)
+        return f"error: {msg}"
 
     except Exception as e:
         logger.error(f"❌ Error fetching opinion for {symbol}: {e}")

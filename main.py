@@ -36,13 +36,13 @@ def analyze_symbol(symbol_data):
 
     hist_data = historicals.get_historical_data(symbol)
     metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price)
-    td_opinion = web_scrapper.get_trading_view_opinion(symbol)
+    tv_opinion = web_scrapper.get_trading_view_opinion(symbol)
 
     return {
         "symbol": symbol,
         "current_price": current_price,
         "metrics": metrics,
-        "td_opinion": td_opinion
+        "tv_opinion": tv_opinion
     }
 
 def enrich_analysis_df(df, analysis, force_opinion):
@@ -50,10 +50,12 @@ def enrich_analysis_df(df, analysis, force_opinion):
     for item in analysis:
         symbol = item["symbol"]
         metrics = item["metrics"]
-        td_opinion = item["td_opinion"]
+        tv_opinion = item["tv_opinion"]
 
-        general.add_opinion(symbol, df, "manual_financial_analysis", metrics["evaluation"])
-        general.add_opinion(symbol, df, "trading_view_opinion", td_opinion)
+        # TODO: enhance manual calculations
+        #general.add_opinion(symbol, df, "manual_financial_analysis", metrics["evaluation"])
+ 
+        general.add_opinion(symbol, df, "trading_view_opinion", tv_opinion)
 
         if "failed" not in metrics["evaluation"]:
             llm_opinion = llms.get_llm_signals_analysis(metrics["signals"], symbol, item["current_price"])
@@ -62,7 +64,7 @@ def enrich_analysis_df(df, analysis, force_opinion):
 
         general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
 
-    return general.generate_decision_column(df, force_opinion)
+    return general.generate_action_column(df, force_opinion)
 
 def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
     transactions_df = google_handler.load_data(config["transactions_file_id"])
@@ -93,7 +95,7 @@ def main():
     analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])
 
     # Filter to only BUY recommendations
-    buy_df = analysis_df[analysis_df['decision'] == 'BUY'].copy()
+    buy_df = analysis_df[analysis_df['action'] == 'BUY'].copy()
     buy_df['buy_date'] = now_madrid
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
     buy_date_col = buy_df.pop('buy_date')
