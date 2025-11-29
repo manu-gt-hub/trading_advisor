@@ -48,12 +48,11 @@ def get_llm_signals_analysis(signals, symbol, current_price):
 
     prompt = (
         f"Return a clear answer about the symbol and these historical metrics: {metrics} "
-        f"Focus on indicators: SMA_50, SMA_200, RSI, MACD, MACD_Signal, MACD_Hist. "
         f"My goal is to identify **short-term bullish setups** (1–4 weeks) "
         f"potentially capable of yielding around {revenue_percentage}% profit. "
         f"The answer must be: 'SELL -', 'HOLD -', 'BUY -', or 'EMPTY_DECISION -' "
         f"(if there is no clear decision or insufficient data). "
-        f"Keep the explanation brief (max 20 words) and include the indicators in parentheses."
+        f"Keep the explanation brief (max 30 words) and include the indicators in parentheses."
     )
 
     try:

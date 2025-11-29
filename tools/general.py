@@ -4,8 +4,36 @@ import re
 import logging
 from datetime import datetime
 import pytz
+import os
+import csv
 
 logger = logging.getLogger(__name__)
+
+def get_mapping_string(symbol, csv_file_path='resources/investing_symbol_mapping.csv'):
+    # Check if the CSV file exists
+    if not os.path.exists(csv_file_path):
+        print(f"Error: The file {csv_file_path} was not found.")
+        return None
+
+    try:
+        # Open the CSV file for reading
+        with open(csv_file_path, mode='r', newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)  # Use DictReader to work with headers
+
+            # Iterate through the rows of the CSV file
+            for row in reader:
+                # Compare the symbol and return the mapping_string if there is a match
+                if row['symbol'] == symbol:
+                    return row['mapping_string']
+
+        # If no match is found, return None
+        print(f"The symbol {symbol} was not found in the CSV file.")
+        return None
+
+    except Exception as e:
+        # Handle any exceptions that occur while reading the CSV file
+        print(f"Error reading the CSV file: {e}")
+        return None
 
 def add_opinion(symbol,df,new_column_name,opinion):
     df.loc[df['symbol'] == symbol, new_column_name] = opinion
