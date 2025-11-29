@@ -1,7 +1,10 @@
 
 import pandas as pd
 from datetime import datetime
+import numpy as np
 import logging
+
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -63,17 +66,17 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
     return pd.DataFrame(updated_rows)
 
 
+import pandas as pd
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
 def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -> dict:
     """
-    Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators.
-
-    Parameters:
-        symbol (str): Stock symbol.
-        df (pd.DataFrame): Historical stock data containing at least 'date' and 'close' columns.
-        current_price (float): The stock's current market price.
-
-    Returns:
-        dict: A dictionary with the evaluation decision, confidence, active signals, and raw indicator values.
+    Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators,
+    historical volatility, monthly returns, breakouts, and momentum.
+    Returns all numeric values as native Python floats rounded to 4 decimals.
     """
 
     logger.info(f"Evaluating buy interest for: {symbol}")
@@ -82,15 +85,18 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         df.columns = df.columns.str.lower()
         df['date'] = pd.to_datetime(df['date'])
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
+        df['open'] = pd.to_numeric(df['open'], errors='coerce')
 
         if len(df) < 200:
             raise ValueError("Insufficient data: at least 200 rows required.")
 
-        # Technical indicators
+        # -------------------------
+        # Technical Indicators
+        # -------------------------
         df["ma50"] = df["close"].rolling(window=50).mean()
         df["ma200"] = df["close"].rolling(window=200).mean()
 
-        # RSI (Relative Strength Index)
+        # RSI (14 días)
         delta = df["close"].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -98,22 +104,49 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         avg_loss = loss.rolling(window=14).mean()
         rs = avg_gain / avg_loss
         df["rsi"] = 100 - (100 / (1 + rs))
-        df["rsi"] = df["rsi"].clip(lower=0, upper=100)  # prevent invalid RSI values
+        df["rsi"] = df["rsi"].clip(lower=0, upper=100)
 
-        # MACD (Moving Average Convergence Divergence)
+        # MACD
         ema_12 = df["close"].ewm(span=12, adjust=False).mean()
         ema_26 = df["close"].ewm(span=26, adjust=False).mean()
         df["macd"] = ema_12 - ema_26
         df["signal_line"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-        # Momentum: slope of MA50 over last 5 days
+        # MA50 Slope
         df["ma50_slope"] = df["ma50"].diff(5)
 
-        # Extract the two most recent rows for crossover analysis
+        # -------------------------
+        # Short-term momentum: Rate of Change (ROC 10 días)
+        # -------------------------
+        df["roc_10"] = df["close"].pct_change(10)
+
+        # -------------------------
+        # Volatilidad histórica
+        # -------------------------
+        df["daily_return"] = df["close"].pct_change()
+        df["volatility_20"] = df["daily_return"].rolling(20).std()
+        df["atr_14"] = (df["close"] - df["open"]).abs().rolling(14).mean()  # aproximación ATR
+
+        # -------------------------
+        # Breakout 20 días
+        # -------------------------
+        df["breakout_20"] = df["close"] > df["close"].rolling(20).max().shift(1)
+
+        # -------------------------
+        # Retorno mensual histórico
+        # -------------------------
+        df["monthly_return"] = df["close"].pct_change(21)
+        monthly_10pct_prob = (df["monthly_return"] >= 0.10).mean()  # probabilidad histórica >10%/mes
+
+        # -------------------------
+        # Extract latest and previous
+        # -------------------------
         latest = df.iloc[-1]
         previous = df.iloc[-2]
 
+        # -------------------------
         # Collect raw indicator values
+        # -------------------------
         signals_dict = {
             "SMA_50": latest["ma50"],
             "SMA_200": latest["ma200"],
@@ -122,14 +155,22 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "MACD_Signal": latest["signal_line"],
             "MACD_Hist": latest["macd"] - latest["signal_line"],
             "MA50_Slope": latest["ma50_slope"],
+            "ROC_10": latest["roc_10"],
+            "Volatility_20": latest["volatility_20"],
+            "ATR_14": latest["atr_14"],
+            "Breakout_20": latest["breakout_20"],
+            "Monthly_10pct_Prob": monthly_10pct_prob,
             "Current_Price": current_price
         }
 
+        # -------------------------
+        # Evaluate signals
+        # -------------------------
         active_signals = []
         buy_signals = 0
         sell_signals = 0
 
-        # Signal: Moving Average Crossover
+        # MA Crossover
         if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
             if latest["ma50"] > latest["ma200"]:
                 active_signals.append("✅ Bullish trend (MA50 > MA200)")
@@ -138,7 +179,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ Bearish trend (MA50 < MA200)")
                 sell_signals += 1
 
-        # Signal: RSI level
+        # RSI
         if pd.notna(latest["rsi"]):
             rsi = latest["rsi"]
             if 40 < rsi < 70:
@@ -153,7 +194,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             else:
                 active_signals.append(f"⚠️ RSI neutral ({rsi:.2f})")
 
-        # Signal: MACD crossover
+        # MACD Crossover
         if all(pd.notna([previous["macd"], previous["signal_line"], latest["macd"], latest["signal_line"]])):
             if previous["macd"] < previous["signal_line"] and latest["macd"] > latest["signal_line"]:
                 active_signals.append("✅ MACD bullish crossover")
@@ -162,7 +203,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("❌ MACD bearish crossover")
                 sell_signals += 1
 
-        # Signal: MA50 slope (momentum)
+        # MA50 slope
         if pd.notna(latest["ma50_slope"]):
             if latest["ma50_slope"] > 0:
                 active_signals.append("📈 Positive MA50 slope (uptrend momentum)")
@@ -171,7 +212,31 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append("📉 Negative MA50 slope (downtrend momentum)")
                 sell_signals += 0.5
 
-        # Final decision based on signal count
+        # ROC_10 momentum
+        if pd.notna(latest["roc_10"]):
+            if latest["roc_10"] > 0:
+                active_signals.append(f"📈 Positive 10-day ROC ({latest['roc_10']:.2%})")
+                buy_signals += 0.5
+            else:
+                active_signals.append(f"📉 Negative 10-day ROC ({latest['roc_10']:.2%})")
+                sell_signals += 0.5
+
+        # Breakout
+        if latest["breakout_20"]:
+            active_signals.append("🚀 20-day breakout")
+            buy_signals += 1
+
+        # Monthly 10% probability
+        if monthly_10pct_prob >= 0.15:
+            active_signals.append(f"📊 Historical monthly +10% probability: {monthly_10pct_prob:.1%}")
+            buy_signals += 1
+        else:
+            active_signals.append(f"⚠️ Low historical monthly +10% probability: {monthly_10pct_prob:.1%}")
+            sell_signals += 0.5
+
+        # -------------------------
+        # Final decision
+        # -------------------------
         if buy_signals > sell_signals:
             decision = "BUY"
         elif sell_signals > buy_signals:
@@ -182,7 +247,15 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         # Confidence score
         confidence = (buy_signals - sell_signals) / max(buy_signals + sell_signals, 1)
 
-        logger.info(f"✅ Succesfully evaluated buy interest for: {symbol}")
+        # -------------------------
+        # Convert NumPy types to native float and round
+        # -------------------------
+        signals_dict = {
+            k: (round(float(v), 4) if isinstance(v, (np.generic, np.float64, np.int64)) else v)
+            for k, v in signals_dict.items()
+        }
+
+        logger.info(f"✅ Successfully evaluated buy interest for: {symbol}")
 
         return {
             "symbol": symbol,

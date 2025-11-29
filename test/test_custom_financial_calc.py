@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from tempfile import NamedTemporaryFile
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
-from custom_financial_calc import review_transactions, evaluate_buy_interest
+from tools.custom_financial_calc import review_transactions, evaluate_buy_interest
 
 # Get revenue percentage from environment variable or use a default (e.g. 10%)
 REVENUE_PERCENTAGE = float(os.environ.get("REVENUE_PERCENTAGE", 20.0))
@@ -75,12 +75,17 @@ def test_evaluate_buy_interest_returns_expected_structure():
         "MACD_Signal",
         "MACD_Hist",
         "MA50_Slope",
+        "ROC_10",
+        "Volatility_20",
+        "ATR_14",
+        "Breakout_20",
+        "Monthly_10pct_Prob",
         "Current_Price"
     ]:
         assert key in result["signals"]
 
     # Sanity check: Current_Price should match the input
-    assert result["signals"]["Current_Price"] == current_price
+    assert round(result["signals"]["Current_Price"], 2) == round(current_price, 2)
 
 
 def test_evaluate_buy_interest_buy_or_sell_or_hold():
@@ -89,6 +94,7 @@ def test_evaluate_buy_interest_buy_or_sell_or_hold():
 
     result = evaluate_buy_interest("MSFT", df, current_price)
     eval = result["evaluation"]
+
     # Since data is real-ish, expect one of these
     assert eval in ["BUY", "SELL", "HOLD"]
 
