@@ -16,18 +16,36 @@ def test_get_llm_analysis_basic():
         "MACD": 1.2,
         "MACD_Signal": 1.1,
         "MACD_Hist": 0.1,
-        "ROC_10" = 0.0559,
-        "Volati2lity_20" = 0.0317,
-        "ATR_14" = 9.307,
-        "Breakout_20" = 0.0,
-        "Monthly_10pct_Prob" = 0.2739,
-        "Current_Price" = 150.0
+        "ROC_10": 0.0559,
+        "Volatility_20": 0.0317,
+        "ATR_14": 9.307,
+        "Breakout_20": 0.0,
+        "Monthly_10pct_Prob": 0.2739,
+        "Current_Price": 150.0
     }
-    symbol = "AAPL"
-    current_price = 150.0
 
+    symbol = "AAPL"
+
+    # Call the function under test
     result = get_llm_signals_analysis(signals, symbol)
 
-    # The result should be a non-empty string
-    assert isinstance(result, str)
-    assert len(result) > 0
+    # Basic validations
+    assert isinstance(result, str), "The LLM response should be a string."
+    assert len(result) > 0, "The LLM response should not be empty."
+
+    # Ensure the output follows the 'DECISION - explanation' format
+    assert " - " in result, "Output should follow the format: DECISION - explanation."
+
+    # Extract DECISION part
+    decision = result.split(" - ")[0].strip().upper()
+
+    # Valid decisions allowed by spec
+    valid_decisions = {"BUY", "HOLD", "SELL", "EMPTY_DECISION"}
+    assert decision in valid_decisions, f"Decision '{decision}' is not valid."
+
+    # Ensure explanation is present and not empty
+    explanation = result.split(" - ", 1)[1].strip()
+    assert len(explanation) > 0, "Explanation should not be empty."
+
+    # Optional: ensure output isn't excessively long (LLM sometimes rambles)
+    assert len(result) < 200, "LLM output should be short (max 30 words)."
