@@ -24,7 +24,7 @@ def get_llm_file_analysis():
     # TODO: upload the file to openAI
     raise ("to be defined")
 
-def get_llm_signals_analysis(signals, symbol, current_price):
+def get_llm_signals_analysis(signals, symbol):
     """
     Query the LLM model with stock signals and get a concise buy/hold/sell recommendation.
     
