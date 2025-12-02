@@ -50,6 +50,7 @@ jobs:
           TRADING_ADVISOR_FOLDER_ID: ${{ secrets.FINNHUB_API_KEY }}
           BUY_RECOMMENDATIONS_ID: ${{ secrets.BUY_RECOMMENDATIONS_ID }}
           ANALYSIS_FILE_ID : ${{ secrets.ANALYSIS_FILE_ID }}
+          DEEPKSEEK_API_KEY : ${{ secrets.DEEPKSEEK_API_KEY }}
           
           ALPHA_VANTAGE_URL: ${{ vars.ALPHA_VANTAGE_URL }}
           REVENUE_PERCENTAGE: ${{ vars.REVENUE_PERCENTAGE }}      
@@ -58,7 +59,7 @@ jobs:
           GOOGLE_FINANCE_LOSERS_URL: ${{ vars.GOOGLE_FINANCE_LOSERS_URL }}  
           LOG_LEVEL:  ${{ vars.LOG_LEVEL }}   
           FORCE_OPINION: ${{ vars.FORCE_OPINION }} 
-          LLM_MODEL_NAME: ${{ vars.LLM_MODEL_NAME }} 
+          GPT_MODEL_NAME: ${{ vars.GPT_MODEL_NAME }} 
           TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
             
         run: python main.py
