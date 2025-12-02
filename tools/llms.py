@@ -24,7 +24,7 @@ def get_llm_file_analysis():
     # TODO: upload the file to openAI
     raise ("to be defined")
 
-def get_llm_signals_analysis(signals, symbol):
+def get_llm_signals_analysis(signals, symbol, current_price):
     """
     Query the LLM model with stock signals and get a concise buy/hold/sell recommendation.
     
@@ -47,7 +47,7 @@ def get_llm_signals_analysis(signals, symbol):
     metrics = "\n".join([f"{signal} = {value} " for signal, value in signals.items()])
 
     prompt = (
-        f"Return a clear answer about the symbol using these historical metrics:\n{metrics}\n\n"
+        f"Return a clear answer about the symbol using these historical metrics:\n{metrics} and current_price:{current_price}\n\n"
         f"Goal: identify short-term bullish setups (1–4 weeks) potentially capable of yielding ~{revenue_percentage}% profit.\n"
         f"Output format: DECISION - brief explanation (max 30 words, include indicators in parentheses).\n"
         f"Options for DECISION: SELL, HOLD, BUY, EMPTY_DECISION."
