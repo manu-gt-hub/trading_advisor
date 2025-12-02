@@ -47,5 +47,6 @@ def test_get_llm_analysis_basic():
     explanation = result.split(" - ", 1)[1].strip()
     assert len(explanation) > 0, "Explanation should not be empty."
 
-    # Optional: ensure output isn't excessively long (LLM sometimes rambles)
-    assert len(result) < 200, "LLM output should be short (max 30 words)."
+    # Enforce 30-word max per prompt specifications
+    word_count = len(result.split())
+    assert word_count <= 30, f"LLM output exceeds 30 words (found {word_count})."
