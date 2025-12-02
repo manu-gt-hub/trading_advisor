@@ -73,7 +73,7 @@ def get_llm_signals_analysis(signals, symbol, current_price):
             temperature=llm_temperature
         )
 
-        return response.choices[0].message.content
+        return response.choices[0].message.content + metrics
 
     except Exception as e:
         error_msg = f"Error getting LLM analysis for {symbol}: {e}"
