@@ -44,15 +44,13 @@ def get_llm_signals_analysis(signals, symbol, current_price):
     logger.info(f"Calling LLM model {model_name}...")
 
     # Prepare metrics string from signals dictionary
-    metrics = "\n".join([f"{signal} = {value}" for signal, value in signals.items()]) + "\n"
+    metrics = "\n".join([f"{signal} = {value} " for signal, value in signals.items()])
 
     prompt = (
-        f"Return a clear answer about the symbol and these historical metrics: {metrics} "
-        f"My goal is to identify **short-term bullish setups** (1–4 weeks) "
-        f"potentially capable of yielding around {revenue_percentage}% profit. "
-        f"The answer must be: 'SELL -', 'HOLD -', 'BUY -', or 'EMPTY_DECISION -' "
-        f"(if there is no clear decision or insufficient data). "
-        f"Keep the explanation brief (max 30 words) and include the indicators in parentheses."
+        f"Return a clear answer about the symbol using these historical metrics:\n{metrics}\n\n"
+        f"Goal: identify short-term bullish setups (1–4 weeks) potentially capable of yielding ~{revenue_percentage}% profit.\n"
+        f"Output format: DECISION - brief explanation (max 30 words, include indicators in parentheses).\n"
+        f"Options for DECISION: SELL, HOLD, BUY, EMPTY_DECISION."
     )
 
     try:
@@ -73,7 +71,7 @@ def get_llm_signals_analysis(signals, symbol, current_price):
             temperature=llm_temperature
         )
 
-        return response.choices[0].message.content + "(" + metrics + ")"
+        return response.choices[0].message.content
 
     except Exception as e:
         error_msg = f"Error getting LLM analysis for {symbol}: {e}"
