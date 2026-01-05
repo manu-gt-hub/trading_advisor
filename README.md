@@ -1,4 +1,4 @@
-# Cloud LLM Deployment Example
+# Cloud LLM Deployment (<trading advisor)>
 
 Welcome to this example repository demonstrating how to deploy and run a Large Language Model (LLM) in the cloud! This project serves as a practical guide for setting up, deploying, and executing an LLM on cloud infrastructure, making it easy for developers and enthusiasts to learn and experiment.
 
@@ -11,6 +11,8 @@ Welcome to this example repository demonstrating how to deploy and run a Large L
 - Easily adaptable to different cloud providers and models
 
 ## 🛠️ Getting Started
+
+### (usage documented at the bottom)
 
 ### Prerequisites
 
@@ -79,3 +81,22 @@ For detailed setup guides, architecture overview, and advanced usage, check out 
 
 This repository is intended for educational and learning purposes only.
 It is not optimized for production use, security, or scalability. Use responsibly and at your own risk.
+
+### USAGE
+
+Steps:
+
+   - set variables for: Google drive space and files, finnhub, OpenAI, ALPHA vantage API key etc. 
+   - add symbol to the ENV variable: SYMBOLS_INTEREST_LIST
+   - add market related to symbol into the dictionary located on resources/symbols_markets.json
+   - an analysis_file and buy_recommendation files would be created on the folder
+   - (optional) force opinion for one LLM or another, or both as default if the opinion is equal
+   - final decision is evaluated on: generals.generate_action_column()
+   - to add/remove opinions, just use generals.add_opinion() over the final dataframe on main.py
+
+### TEST
+
+   - run: pytest in the terminal on the project root
+   - run (example): pytest test/test_general.py -s
+   - run E2E: python main.py --test
+

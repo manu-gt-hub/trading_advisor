@@ -255,7 +255,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             for k, v in signals_dict.items()
         }
 
-        logger.info(f"✅ Successfully evaluated buy interest for: {symbol}")
+        logger.info(f"✅ Successfully evaluated buy interest for {symbol}: {signals_dict}")
 
         return {
             "symbol": symbol,

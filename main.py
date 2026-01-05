@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
 import ast
+import argparse
 import os
 import pandas as pd
 import logging
-from tools import google_handler, finnhub_client, historicals, web_scrapper, custom_financial_calc as cfc, general, llms
+from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms
 import numpy as np
 
 
@@ -33,11 +34,11 @@ def analyze_symbol(symbol_data):
     """Analyze a single stock symbol."""
     symbol = symbol_data['symbol']
     current_price = symbol_data['current_price']
+    #normalize symbol in cases like: RHM.DE
+    symbol = symbol.split(".")[0]
 
     hist_data = historicals.get_historical_data(symbol)
     metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price)
-    # tv_opinion = web_scrapper.get_trading_view_opinion(symbol)
-    # investing_opinion = web_scrapper.get_investing_opinion(symbol)
 
     return {
         "symbol": symbol,
@@ -50,14 +51,6 @@ def enrich_analysis_df(df, analysis, force_opinion):
     for item in analysis:
         symbol = item["symbol"]
         metrics = item["metrics"]
-        # tv_opinion = item["tv_opinion"]
-        # investing_opinion = item["investing_opinion"]
-
-        # TODO: enhance manual calculations
-        #general.add_opinion(symbol, df, "manual_financial_analysis", metrics["evaluation"])
- 
-        #general.add_opinion(symbol, df, "trading_view_opinion", tv_opinion)
-        #general.add_opinion(symbol, df, "investing_opinion", investing_opinion)
 
         if "failed" not in metrics["evaluation"]:
             llm_opinion = llms.get_gpt_signals_analysis(metrics["signals"], symbol, item["current_price"])
@@ -65,6 +58,12 @@ def enrich_analysis_df(df, analysis, force_opinion):
             llm_opinion = "error: metrics not provided"
 
         general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
+
+        # TODO: enhance manual calculations
+        #general.add_opinion(symbol, df, "manual_financial_analysis", metrics["evaluation"])
+
+        # TODO: implement second LLM optinion
+        #general.add_opinion(symbol, df, "llm_2_opinion", llm_opinion)
 
     return general.generate_action_column(df, force_opinion)
 
@@ -83,7 +82,8 @@ def save_outputs(buy_df, analysis_df, config):
     google_handler.save_dataframe_file_id(buy_df, config["buy_file_id"])
     google_handler.save_dataframe_file_id(analysis_df, config["analysis_file_id"])
 
-def main():
+def main(show_dataframes=False):
+
     config = load_config()
     now_madrid = general.get_current_time_madrid()
 
@@ -103,9 +103,23 @@ def main():
     buy_date_col = buy_df.pop('buy_date')
     buy_df.insert(2, 'buy_date', buy_date_col)
 
+    buy_df = general.add_urls_column(buy_df)
+
     # Update and save all outputs
     update_and_save_transactions(config, symbols_info_list, buy_df, now_madrid)
     save_outputs(buy_df, analysis_df, config)
 
+    config.get("logger").info("✅ successfully run main")
+    if show_dataframes:
+        print("\n--- DataFrame Analysis ---")
+        print(analysis_df)
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="execute main script")
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="show final DFs for testing/debug"
+    )
+    args = parser.parse_args()
+    main(show_dataframes=args.test)

@@ -3,7 +3,6 @@ import os
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
-from tempfile import NamedTemporaryFile
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
 from tools.custom_financial_calc import review_transactions, evaluate_buy_interest
 

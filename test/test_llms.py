@@ -6,7 +6,7 @@ from unittest.mock import patch, Mock
 import requests
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
-from llms import get_gpt_signals_analysis, get_deepseek_signals_analysis  # Asegúrate de importar la función que quieres probar.
+from llms import get_gpt_signals_analysis
 
 symbol = "AAPL"
 current_price = 155.0
