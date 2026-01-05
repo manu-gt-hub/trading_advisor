@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # Permitir push en main
+  contents: write  
 
 jobs:
   run-script:
