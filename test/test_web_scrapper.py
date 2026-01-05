@@ -2,8 +2,8 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
-from tools.web_scrapper import get_investing_opinion,get_trading_view_opinion
 
+# DEPRECATED DUE TO CAPTCHAS
 # TODO: with investing it has tu run in no-headless mode
 # Test for the get_investing_opinion function
 # def test_get_investing_opinion():

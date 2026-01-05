@@ -15,7 +15,7 @@ def generate_prompt(metrics, current_price):
         logger.warning("REVENUE_PERCENTAGE is not defined in the environment.")
 
     return (
-        f"Return a clear answer about the symbol using these historical metrics:\n{metrics} and current_price:{current_price}\n\n"
+        f"Return a clear answer about the symbol using these historical metrics:\n{metrics}\n\n"
         f"Goal: identify short-term bullish setups (1–4 weeks) potentially capable of yielding ~{revenue_percentage}% profit.\n"
         f"Output format: DECISION - brief explanation (max 30 words, include indicators in parentheses).\n"
         f"Options for DECISION: SELL, HOLD, BUY, EMPTY_DECISION."
@@ -120,6 +120,8 @@ def get_gpt_signals_analysis(signals, symbol, current_price):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
+        
+        logger.info(f"LLM prompt sent: {prompt}")
 
         response = openai.chat.completions.create(
             model=model_name,
@@ -127,7 +129,11 @@ def get_gpt_signals_analysis(signals, symbol, current_price):
             temperature=llm_temperature
         )
 
-        return response.choices[0].message.content
+        llm_answer = response.choices[0].message.content
+
+        logger.info(f"LLM answer: {llm_answer}")
+
+        return llm_answer
 
     except Exception as e:
         error_msg = f"Error getting GPT analysis for {symbol}: {e}"

@@ -1,0 +1,14 @@
+{
+  "NVDA": {"market": "NASDAQ"},
+  "MSFT": {"market": "NASDAQ"},
+  "GOOGL": {"market": "NASDAQ"},
+  "AVGO": {"market": "NASDAQ"},
+  "AMZN": {"market": "NASDAQ"},
+  "META": {"market": "NASDAQ"},
+  "RTX": {"market": "NYSE"},
+  "NOC": {"market": "NYSE"},
+  "RHM.DE": {"market": "XETR", "symbol": "RHM"},
+  "XOM": {"market": "NYSE"},
+  "JNJ": {"market": "NYSE"},
+  "KO": {"market": "NYSE"}
+}

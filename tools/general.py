@@ -6,6 +6,8 @@ from datetime import datetime
 import pytz
 import os
 import csv
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,7 @@ def parse_transactions_df(df):
     return parsed_df
 
 # Function to extract the dominant opinion from trading_view_opinion
+# DEPRECATED DUE TO CAPTCHAS
 def extract_trading_view_decision(opinion):
     if opinion == None:
         return "error"
@@ -76,18 +79,18 @@ def extract_custom_decision(opinion):
     return opinion.split(' ')[1].strip().upper()  # Returns 'SELL', 'BUY', etc.
 
 # Function to decide final action based on both opinions
-def decide_final_action(tv_decision, llm_decision):
+def decide_final_action(llm_decision,llm_2_decision):
     error_values = [None, 'error']
 
     # If both decisions are the same and valid, return it
-    if tv_decision == llm_decision and (tv_decision not in error_values) and (llm_decision not in error_values):
-        return tv_decision
-    # If TV is invalid but LLM is valid, return LLM
-    elif tv_decision in error_values and llm_decision not in error_values:
+    if llm_2_decision == llm_decision and (llm_2_decision not in error_values) and (llm_decision not in error_values):
+        return llm_2_decision
+    # If LLM2 is invalid but LLM is valid, return LLM
+    elif llm_2_decision in error_values and llm_decision not in error_values:
         return llm_decision
-    # If LLM is invalid but TV is valid, return TV
-    elif llm_decision in error_values and tv_decision not in error_values:
-        return tv_decision
+    # If LLM is invalid but LLM2 is valid, return LLM2
+    elif llm_decision in error_values and llm_2_decision not in error_values:
+        return llm_2_decision
     # Otherwise, no clear decision
     else:
         return 'EMPTY_DECISION'
@@ -97,11 +100,11 @@ def decide_final_action(tv_decision, llm_decision):
 def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     """
     Adds a 'action' column to the DataFrame based on matching logic
-    between 'trading_view_opinion' and 'llm_opinion'.
+    between 'llm_opinion' and 'llm_2_opinion'.
 
     Parameters:
-        df (pd.DataFrame): DataFrame containing 'trading_view_opinion' and 'llm_opinion' columns.
-        force_opinion (str): Optionally force decision source: "LLM", "TV", or "CUSTOM".
+        df (pd.DataFrame): DataFrame containing 'llm_opinion' and 'llm_2_opinion' columns.
+        force_opinion (str): Optionally force decision source: "LLM", "LLM2", or "CUSTOM".
 
     Returns:
         pd.DataFrame: Original DataFrame with 'action' column added.
@@ -110,15 +113,15 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     opinion_type = opinion_type.strip().upper()
     logger.debug(f"Opinion type: {opinion_type}")
 
-    if opinion_type == "TV":
-        logger.debug("set decision logic as TV")
-
-        df['action'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
-
-    elif opinion_type == "LLM":
-        logger.debug("set decision logic as LLM")
+    if opinion_type == "LLM1":
+        logger.debug("set decision logic as LLM-1")
 
         df['action'] = df['llm_opinion'].apply(extract_llm_decision)
+
+    elif opinion_type == "LLM2":
+        logger.debug("set decision logic as LLM-2")
+
+        df['action'] = df['llm_2_opinion'].apply(extract_llm_decision)
 
     elif opinion_type == "CUSTOM":
         logger.debug("set decision logic as CUSTOM")
@@ -128,16 +131,55 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     else:  # Default logic: compare both and apply decision logic
         logger.debug("set decision logic as DEFAULT")
 
-        df['tv_decision'] = df['trading_view_opinion'].apply(extract_trading_view_decision)
-        df['llm_decision'] = df['llm_opinion'].apply(extract_llm_decision)
+        df['llm_opinion'] = df['llm_opinion'].apply(extract_llm_decision)
+        df['llm_2_opinion'] = df['llm_2_opinion'].apply(extract_llm_decision)
         df['action'] = df.apply(
-            lambda row: decide_final_action(row['tv_decision'], row['llm_decision']), axis=1
+            lambda row: decide_final_action(row['llm_opinion'], row['llm_2_opinion']), axis=1
         )
         
-        df = df.drop(columns=['tv_decision', 'llm_decision'])
+        df = df.drop(columns=['llm_opinion', 'llm_2_opinion'])
 
     return df
 
 def get_current_time_madrid():
     madrid_tz = pytz.timezone('Europe/Madrid')
     return datetime.now(madrid_tz).strftime("%Y-%m-%d %H:%M")
+
+def normalize_for_tradingview(symbol, info):
+    """
+    If the JSON entry has a 'symbol' key (different from original), use it.
+    Otherwise, use the original symbol.
+    Remove any suffix like '.DE' when building the URL.
+    """
+    tv_symbol = info.get("symbol", symbol)
+    return tv_symbol.split(".")[0]
+
+def add_urls_column(buy_df, symbol_col="symbol"):
+    """
+    Adds a 'tradingview_url' column to the DataFrame.
+    The URL is built based on the market and symbol info loaded from JSON.
+    If symbol is not found, the value is 'NOT FOUND'.
+    """
+
+    # Load SYMBOLS_MARKETS from JSON
+    project_root = Path(__file__).resolve().parent.parent
+    json_path = project_root / "resources" / "symbols_markets.json"
+    with open(json_path, "r", encoding="utf-8") as f:
+        SYMBOLS_MARKETS = json.load(f)
+
+    def build_url(symbol):
+        if not isinstance(symbol, str):
+            return "NOT FOUND"
+
+        info = SYMBOLS_MARKETS.get(symbol)
+        if not info or "market" not in info:
+            return "NOT FOUND"
+
+        tv_symbol = normalize_for_tradingview(symbol, info)
+        market = info["market"]
+
+        return f"https://en.tradingview.com/symbols/{market}-{tv_symbol}/technicals/"
+
+    # Add the new column at the end
+    buy_df["tradingview_url"] = buy_df[symbol_col].apply(build_url)
+    return buy_df
