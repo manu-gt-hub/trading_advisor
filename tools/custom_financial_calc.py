@@ -83,7 +83,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
     try:
         df = df.copy()
         df.columns = df.columns.str.lower()
-        df['date'] = pd.to_datetime(df['date'])
+        df['date'] = pd.to_datetime(df['date'], utc=True)
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
         df['open'] = pd.to_numeric(df['open'], errors='coerce')
 
@@ -270,6 +270,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         return {
             "symbol": symbol,
             "evaluation": "EVALUATION_FAILED",
+            "confidence": 0.0,  # <--- agregado
             "active_signals": ["Evaluation failed due to error."],
             "signals": {"error": str(e)}
         }
