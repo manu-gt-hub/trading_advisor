@@ -93,6 +93,7 @@ Steps:
    - (optional) force opinion for one LLM or another, or both as default if the opinion is equal
    - final decision is evaluated on: generals.generate_action_column()
    - to add/remove opinions, just use generals.add_opinion() over the final dataframe on main.py
+   -  :)
 
 ### TEST
 
