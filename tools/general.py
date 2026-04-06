@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def get_mapping_string(symbol, csv_file_path='resources/investing_symbol_mapping.csv'):
     # Check if the CSV file exists
     if not os.path.exists(csv_file_path):
-        print(f"Error: The file {csv_file_path} was not found.")
+        logger.error(f"Error: The file {csv_file_path} was not found.")
         return None
 
     try:
@@ -29,12 +29,12 @@ def get_mapping_string(symbol, csv_file_path='resources/investing_symbol_mapping
                     return row['mapping_string']
 
         # If no match is found, return None
-        print(f"The symbol {symbol} was not found in the CSV file.")
+        logger.warning(f"The symbol {symbol} was not found in the CSV file.")
         return None
 
     except Exception as e:
         # Handle any exceptions that occur while reading the CSV file
-        print(f"Error reading the CSV file: {e}")
+        logger.error(f"Error reading the CSV file: {e}")
         return None
 
 def add_opinion(symbol,df,new_column_name,opinion):
@@ -79,21 +79,62 @@ def extract_custom_decision(opinion):
     return opinion.split(' ')[1].strip().upper()  # Returns 'SELL', 'BUY', etc.
 
 # Function to decide final action based on both opinions
-def decide_final_action(llm_decision,llm_2_decision):
-    error_values = [None, 'error']
+def decide_final_action(llm_decision, llm_2_decision, custom_decision=None, custom_confidence=None):
+    error_values = [None, 'error', 'ERROR', 'EMPTY_DECISION', 'EVALUATION_FAILED']
 
-    # If both decisions are the same and valid, return it
-    if llm_2_decision == llm_decision and (llm_2_decision not in error_values) and (llm_decision not in error_values):
-        return llm_2_decision
-    # If LLM2 is invalid but LLM is valid, return LLM
-    elif llm_2_decision in error_values and llm_decision not in error_values:
-        return llm_decision
-    # If LLM is invalid but LLM2 is valid, return LLM2
-    elif llm_decision in error_values and llm_2_decision not in error_values:
-        return llm_2_decision
-    # Otherwise, no clear decision
-    else:
+    llm_valid = llm_decision not in error_values
+    llm2_valid = llm_2_decision not in error_values
+    custom_valid = custom_decision not in error_values
+
+    # Collect valid decisions
+    valid_decisions = []
+    if llm_valid:
+        valid_decisions.append(llm_decision)
+    if llm2_valid:
+        valid_decisions.append(llm_2_decision)
+
+    # If no valid LLM decisions, fall back to custom if available
+    if not valid_decisions:
+        if custom_valid:
+            return custom_decision
         return 'EMPTY_DECISION'
+
+    # If only one valid LLM decision
+    if len(valid_decisions) == 1:
+        single = valid_decisions[0]
+        # If custom agrees or custom is unavailable, use the single LLM decision
+        if not custom_valid or custom_decision == single:
+            return single
+        # LLM and custom disagree: conservative approach — prefer HOLD unless both say SELL
+        if single == 'SELL' and custom_decision == 'SELL':
+            return 'SELL'
+        return 'HOLD'
+
+    # Both LLMs are valid
+    if llm_decision == llm_2_decision:
+        return llm_decision
+
+    # LLMs disagree: use custom as tiebreaker if available
+    if custom_valid:
+        # If custom agrees with either LLM, use that
+        if custom_decision == llm_decision:
+            return llm_decision
+        elif custom_decision == llm_2_decision:
+            return llm_2_decision
+        # Custom disagrees with both: use custom with high confidence, else HOLD
+        if custom_confidence is not None and abs(custom_confidence) >= 0.4:
+            return custom_decision
+        return 'HOLD'
+
+    # LLMs disagree and no custom: conservative HOLD
+    # Exception: if one says BUY and the other HOLD, prefer HOLD (conservative)
+    # Exception: if one says SELL and the other HOLD, prefer SELL (risk management)
+    decisions_set = {llm_decision, llm_2_decision}
+    if decisions_set == {'SELL', 'HOLD'}:
+        return 'SELL'
+    if decisions_set == {'SELL', 'BUY'}:
+        return 'HOLD'
+    return 'HOLD'
 
     
 
@@ -104,7 +145,7 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
 
     Parameters:
         df (pd.DataFrame): DataFrame containing 'llm_opinion' and 'llm_2_opinion' columns.
-        force_opinion (str): Optionally force decision source: "LLM", "LLM2", or "CUSTOM".
+        opinion_type (str): Optionally force decision source: "LLM1", "LLM2", or "CUSTOM".
 
     Returns:
         pd.DataFrame: Original DataFrame with 'action' column added.

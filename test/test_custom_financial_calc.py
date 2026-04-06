@@ -79,7 +79,11 @@ def test_evaluate_buy_interest_returns_expected_structure():
         "ATR_14",
         "Breakout_20",
         "Monthly_10pct_Prob",
-        "Current_Price"
+        "Current_Price",
+        "EMA_20",
+        "MACD_Hist_Slope",
+        "BB_Upper",
+        "BB_Lower",
     ]:
         assert key in result["signals"]
 

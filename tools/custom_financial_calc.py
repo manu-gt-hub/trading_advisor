@@ -6,8 +6,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
     """
     Reviews open transactions and closes those that meet or exceed the required revenue percentage.
@@ -65,12 +63,6 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
 
     return pd.DataFrame(updated_rows)
 
-
-import pandas as pd
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
 
 def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -> dict:
     """
@@ -164,88 +156,196 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         }
 
         # -------------------------
-        # Evaluate signals
+        # Additional indicators for improved precision
         # -------------------------
-        active_signals = []
-        buy_signals = 0
-        sell_signals = 0
+        # EMA 20 for short-term trend
+        df["ema_20"] = df["close"].ewm(span=20, adjust=False).mean()
 
-        # MA Crossover
+        # MACD histogram trend (rising or falling over last 3 bars)
+        df["macd_hist"] = df["macd"] - df["signal_line"]
+        df["macd_hist_slope"] = df["macd_hist"].diff(3)
+
+        # Volume confirmation (if available)
+        has_volume = "volume" in df.columns and pd.notna(latest.get("volume", None))
+        if has_volume:
+            df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+            df["vol_sma_20"] = df["volume"].rolling(20).mean()
+
+        # Bollinger Bands (20, 2)
+        df["bb_mid"] = df["close"].rolling(20).mean()
+        df["bb_std"] = df["close"].rolling(20).std()
+        df["bb_upper"] = df["bb_mid"] + 2 * df["bb_std"]
+        df["bb_lower"] = df["bb_mid"] - 2 * df["bb_std"]
+
+        # Refresh latest/previous with new columns
+        latest = df.iloc[-1]
+        previous = df.iloc[-2]
+
+        # Add new signals to dict
+        signals_dict["EMA_20"] = latest["ema_20"]
+        signals_dict["MACD_Hist_Slope"] = latest["macd_hist_slope"]
+        signals_dict["BB_Upper"] = latest["bb_upper"]
+        signals_dict["BB_Lower"] = latest["bb_lower"]
+        if has_volume:
+            signals_dict["Volume"] = latest["volume"]
+            signals_dict["Vol_SMA_20"] = latest["vol_sma_20"]
+
+        # -------------------------
+        # Weighted signal evaluation
+        # -------------------------
+        # Weights reflect importance for short-term (1-4 week) setups
+        active_signals = []
+        buy_score = 0.0
+        sell_score = 0.0
+
+        # --- TREND (high weight: 2.0) ---
+        # MA50/MA200 crossover — primary trend direction
         if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
             if latest["ma50"] > latest["ma200"]:
                 active_signals.append("✅ Bullish trend (MA50 > MA200)")
-                buy_signals += 1
+                buy_score += 2.0
             else:
                 active_signals.append("❌ Bearish trend (MA50 < MA200)")
-                sell_signals += 1
+                sell_score += 2.0
 
-        # RSI
+        # Price position relative to key moving averages (weight: 1.5)
+        if pd.notna(latest["ma50"]) and pd.notna(latest["ema_20"]):
+            above_ema20 = current_price > latest["ema_20"]
+            above_ma50 = current_price > latest["ma50"]
+            if above_ema20 and above_ma50:
+                active_signals.append(f"✅ Price above EMA20 ({latest['ema_20']:.2f}) and MA50 ({latest['ma50']:.2f})")
+                buy_score += 1.5
+            elif not above_ema20 and not above_ma50:
+                active_signals.append(f"❌ Price below EMA20 ({latest['ema_20']:.2f}) and MA50 ({latest['ma50']:.2f})")
+                sell_score += 1.5
+            else:
+                active_signals.append(f"⚠️ Price between EMA20 and MA50 (mixed)")
+
+        # --- MOMENTUM (weight: 1.5) ---
+        # RSI with nuanced scoring
         if pd.notna(latest["rsi"]):
             rsi = latest["rsi"]
-            if 40 < rsi < 70:
-                active_signals.append(f"✅ RSI in healthy range ({rsi:.2f})")
-                buy_signals += 1
-            elif rsi < 30:
-                active_signals.append(f"✅ RSI oversold ({rsi:.2f})")
-                buy_signals += 1
-            elif rsi > 70:
-                active_signals.append(f"❌ RSI overbought ({rsi:.2f})")
-                sell_signals += 1
-            else:
+            if rsi < 30:
+                active_signals.append(f"✅ RSI oversold — reversal opportunity ({rsi:.2f})")
+                buy_score += 1.5
+            elif 30 <= rsi < 45:
+                active_signals.append(f"⚠️ RSI weak ({rsi:.2f})")
+                sell_score += 0.5
+            elif 45 <= rsi < 55:
                 active_signals.append(f"⚠️ RSI neutral ({rsi:.2f})")
+            elif 55 <= rsi <= 70:
+                active_signals.append(f"✅ RSI strong bullish ({rsi:.2f})")
+                buy_score += 1.5
+            else:  # > 70
+                active_signals.append(f"❌ RSI overbought ({rsi:.2f})")
+                sell_score += 1.5
 
-        # MACD Crossover
+        # MACD crossover (weight: 1.5)
         if all(pd.notna([previous["macd"], previous["signal_line"], latest["macd"], latest["signal_line"]])):
             if previous["macd"] < previous["signal_line"] and latest["macd"] > latest["signal_line"]:
                 active_signals.append("✅ MACD bullish crossover")
-                buy_signals += 1
+                buy_score += 1.5
             elif previous["macd"] > previous["signal_line"] and latest["macd"] < latest["signal_line"]:
                 active_signals.append("❌ MACD bearish crossover")
-                sell_signals += 1
+                sell_score += 1.5
 
+        # MACD histogram momentum — rising/falling trend (weight: 1.0)
+        if pd.notna(latest["macd_hist_slope"]):
+            if latest["macd_hist_slope"] > 0 and latest["macd_hist"] > 0:
+                active_signals.append(f"✅ MACD histogram rising in positive territory")
+                buy_score += 1.0
+            elif latest["macd_hist_slope"] > 0 and latest["macd_hist"] <= 0:
+                active_signals.append(f"📈 MACD histogram recovering (still negative)")
+                buy_score += 0.5
+            elif latest["macd_hist_slope"] < 0 and latest["macd_hist"] < 0:
+                active_signals.append(f"❌ MACD histogram falling in negative territory")
+                sell_score += 1.0
+            elif latest["macd_hist_slope"] < 0 and latest["macd_hist"] >= 0:
+                active_signals.append(f"📉 MACD histogram weakening (still positive)")
+                sell_score += 0.5
+
+        # --- SHORT-TERM MOMENTUM (weight: 1.0) ---
         # MA50 slope
         if pd.notna(latest["ma50_slope"]):
             if latest["ma50_slope"] > 0:
                 active_signals.append("📈 Positive MA50 slope (uptrend momentum)")
-                buy_signals += 0.5
+                buy_score += 0.75
             elif latest["ma50_slope"] < 0:
                 active_signals.append("📉 Negative MA50 slope (downtrend momentum)")
-                sell_signals += 0.5
+                sell_score += 0.75
 
-        # ROC_10 momentum
+        # ROC_10 momentum (weight: 1.0)
         if pd.notna(latest["roc_10"]):
-            if latest["roc_10"] > 0:
-                active_signals.append(f"📈 Positive 10-day ROC ({latest['roc_10']:.2%})")
-                buy_signals += 0.5
+            roc = latest["roc_10"]
+            if roc > 0.05:
+                active_signals.append(f"✅ Strong positive 10-day ROC ({roc:.2%})")
+                buy_score += 1.0
+            elif roc > 0:
+                active_signals.append(f"📈 Mild positive 10-day ROC ({roc:.2%})")
+                buy_score += 0.5
+            elif roc > -0.05:
+                active_signals.append(f"📉 Mild negative 10-day ROC ({roc:.2%})")
+                sell_score += 0.5
             else:
-                active_signals.append(f"📉 Negative 10-day ROC ({latest['roc_10']:.2%})")
-                sell_signals += 0.5
+                active_signals.append(f"❌ Strong negative 10-day ROC ({roc:.2%})")
+                sell_score += 1.0
 
-        # Breakout
+        # --- BREAKOUT & PATTERN (weight: 1.0) ---
         if latest["breakout_20"]:
             active_signals.append("🚀 20-day breakout")
-            buy_signals += 1
+            buy_score += 1.0
+            # Confirm breakout with volume if available
+            if has_volume and pd.notna(latest.get("vol_sma_20")):
+                if latest["volume"] > 1.5 * latest["vol_sma_20"]:
+                    active_signals.append("🚀 Breakout confirmed by high volume")
+                    buy_score += 0.5
 
-        # Monthly 10% probability
+        # Bollinger Band position (weight: 0.75)
+        if pd.notna(latest["bb_lower"]) and pd.notna(latest["bb_upper"]):
+            if current_price <= latest["bb_lower"]:
+                active_signals.append(f"✅ Price at lower Bollinger Band — potential bounce ({latest['bb_lower']:.2f})")
+                buy_score += 0.75
+            elif current_price >= latest["bb_upper"]:
+                active_signals.append(f"❌ Price at upper Bollinger Band — potential pullback ({latest['bb_upper']:.2f})")
+                sell_score += 0.75
+
+        # --- VOLATILITY FILTER (weight: 0.5) ---
+        # High volatility increases risk — penalize both sides slightly
+        if pd.notna(latest["volatility_20"]):
+            vol = latest["volatility_20"]
+            if vol > 0.04:
+                active_signals.append(f"⚠️ High volatility ({vol:.4f}) — elevated risk")
+                # Reduce conviction: add to the weaker side
+                sell_score += 0.5
+            elif vol < 0.015:
+                active_signals.append(f"⚠️ Very low volatility ({vol:.4f}) — potential breakout ahead")
+
+        # --- HISTORICAL PROBABILITY (weight: 0.5) ---
         if monthly_10pct_prob >= 0.15:
             active_signals.append(f"📊 Historical monthly +10% probability: {monthly_10pct_prob:.1%}")
-            buy_signals += 1
+            buy_score += 0.5
         else:
             active_signals.append(f"⚠️ Low historical monthly +10% probability: {monthly_10pct_prob:.1%}")
-            sell_signals += 0.5
+            sell_score += 0.25
 
         # -------------------------
-        # Final decision
+        # Final decision with threshold
         # -------------------------
-        if buy_signals > sell_signals:
+        net_score = buy_score - sell_score
+        total_score = buy_score + sell_score
+
+        # Require a minimum margin to avoid weak signals
+        if total_score == 0:
+            decision = "HOLD"
+        elif net_score >= 2.0:
             decision = "BUY"
-        elif sell_signals > buy_signals:
+        elif net_score <= -2.0:
             decision = "SELL"
         else:
             decision = "HOLD"
 
-        # Confidence score
-        confidence = (buy_signals - sell_signals) / max(buy_signals + sell_signals, 1)
+        # Confidence score normalized to [-1, 1]
+        confidence = net_score / max(total_score, 1)
 
         # -------------------------
         # Convert NumPy types to native float and round

@@ -7,18 +7,42 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-system_prompt = "You are a financial assistant providing buy, hold or sell advice based on given metrics."
+system_prompt = (
+    "You are an expert short-term stock trading analyst. "
+    "You analyze technical indicators to identify high-probability setups for 1-4 week trades. "
+    "You are conservative: you only recommend BUY when multiple strong signals align (trend + momentum + confirmation). "
+    "You recommend SELL when bearish signals dominate. "
+    "You recommend HOLD when signals are mixed or inconclusive. "
+    "Never recommend BUY in a bearish trend unless there is a clear reversal pattern. "
+    "Never recommend SELL in a strong bullish trend unless overbought signals are extreme."
+)
 
-def generate_prompt(metrics, current_price):
+def generate_prompt(metrics, current_price, technical_evaluation=None, confidence=None):
     revenue_percentage = os.getenv('REVENUE_PERCENTAGE') 
     if not revenue_percentage:
         logger.warning("REVENUE_PERCENTAGE is not defined in the environment.")
 
+    # Build context about the technical evaluation if available
+    tech_context = ""
+    if technical_evaluation and confidence is not None:
+        tech_context = (
+            f"\nOur quantitative model rates this stock as: {technical_evaluation} "
+            f"(confidence: {confidence:.2f}, scale -1 to 1).\n"
+            f"Use this as a reference but form your own independent judgment.\n"
+        )
+
     return (
-        f"Return a clear answer about the symbol using these historical metrics:\n{metrics}\n\n"
-        f"Goal: identify short-term bullish setups (1–4 weeks) potentially capable of yielding ~{revenue_percentage}% profit.\n"
-        f"Output format: DECISION - brief explanation (max 30 words, include indicators in parentheses).\n"
-        f"Options for DECISION: SELL, HOLD, BUY, EMPTY_DECISION."
+        f"Analyze the following technical indicators for a stock currently priced at {current_price}:\n"
+        f"{metrics}\n"
+        f"{tech_context}\n"
+        f"KEY RULES:\n"
+        f"- Goal: identify short-term setups (1-4 weeks) capable of ~{revenue_percentage}% profit.\n"
+        f"- BUY only if trend (MA50>MA200, price>EMA20) AND momentum (RSI 55-70, MACD bullish) align.\n"
+        f"- SELL if bearish trend AND weak momentum AND no reversal signs.\n"
+        f"- HOLD if signals are mixed, conflicting, or insufficient for a strong conviction.\n"
+        f"- When in doubt, prefer HOLD over BUY. Avoiding bad trades matters more than catching every opportunity.\n\n"
+        f"Output format: DECISION - brief explanation (max 30 words, include key indicators in parentheses).\n"
+        f"Options for DECISION: BUY, HOLD, SELL."
     )
 
 def check_llm_env():
@@ -48,7 +72,7 @@ def get_llm_file_analysis():
     logger.warning("get_llm_file_analysis function is not yet implemented.")
     raise NotImplementedError("Function 'get_llm_file_analysis' is not implemented yet.")
 
-def get_deepseek_signals_analysis(signals, symbol, current_price):
+def get_deepseek_signals_analysis(signals, symbol, current_price, technical_evaluation=None, confidence=None):
     API_KEY = os.getenv("DEEPKSEEK_API_KEY")
     if not API_KEY:
         logger.error("DEEPKSEEK_API_KEY is not defined in the environment.")
@@ -61,7 +85,7 @@ def get_deepseek_signals_analysis(signals, symbol, current_price):
     }
 
     metrics = "\n".join([f"{signal} = {value} " for signal, value in signals.items()])
-    prompt = generate_prompt(metrics, current_price)
+    prompt = generate_prompt(metrics, current_price, technical_evaluation, confidence)
 
     data = {
         "model": "deepseek-reasoner",  # Use 'deepseek-reasoner' for R1 model or 'deepseek-chat' for V3 model
@@ -76,25 +100,23 @@ def get_deepseek_signals_analysis(signals, symbol, current_price):
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()  # Will raise HTTPError for bad responses (4xx or 5xx)
 
-        if response.status_code == 200:
-            result = response.json()
-            return result['choices'][0]['message']['content']
-        else:
-            logger.error(f"DeepSeek Request failed for symbol {symbol}, error code: {response.status_code}")
-            return f"error {response.status_code}"
+        result = response.json()
+        return result['choices'][0]['message']['content']
 
     except requests.exceptions.RequestException as e:
         logger.error(f"DeepSeek Request failed for symbol {symbol}: {e}")
         return f"error {str(e)}"
 
-def get_gpt_signals_analysis(signals, symbol, current_price):
+def get_gpt_signals_analysis(signals, symbol, current_price, technical_evaluation=None, confidence=None):
     """
     Query the LLM model with stock signals and get a concise buy/hold/sell recommendation.
     
     Parameters:
     - signals: dict of financial indicators (e.g., SMA_50, RSI, MACD)
     - symbol: ticker symbol string
-    - current_price: current stock price (not used here but may be useful)
+    - current_price: current stock price
+    - technical_evaluation: optional string (BUY/HOLD/SELL) from quantitative model
+    - confidence: optional float (-1 to 1) from quantitative model
     
     Returns:
     - LLM-generated text recommendation or error message string
@@ -107,10 +129,10 @@ def get_gpt_signals_analysis(signals, symbol, current_price):
 
     # Prepare metrics string from signals dictionary
     metrics = "\n".join([f"{signal} = {value} " for signal, value in signals.items()])
-    prompt = generate_prompt(metrics, current_price)
+    prompt = generate_prompt(metrics, current_price, technical_evaluation, confidence)
 
     try:
-        openai = OpenAI(
+        client = OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
             http_client=httpx.Client(verify=False)
         )
@@ -123,7 +145,7 @@ def get_gpt_signals_analysis(signals, symbol, current_price):
         
         logger.info(f"LLM prompt sent: {prompt}")
 
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model=model_name,
             messages=messages_prompt,
             temperature=llm_temperature

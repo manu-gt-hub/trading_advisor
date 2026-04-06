@@ -53,7 +53,11 @@ def enrich_analysis_df(df, analysis, force_opinion):
         metrics = item["metrics"]
 
         if "failed" not in metrics["evaluation"]:
-            llm_opinion = llms.get_gpt_signals_analysis(metrics["signals"], symbol, item["current_price"])
+            llm_opinion = llms.get_gpt_signals_analysis(
+                metrics["signals"], symbol, item["current_price"],
+                technical_evaluation=metrics["evaluation"],
+                confidence=metrics["confidence"]
+            )
         else:
             llm_opinion = "error: metrics not provided"
 

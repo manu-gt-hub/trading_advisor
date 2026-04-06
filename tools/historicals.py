@@ -167,8 +167,6 @@ def get_historical_data(symbol: str, force_source: str = None):
         Parsed DataFrame or None
     """
     logger.info(f"Gathering historical data for: {symbol}")
-    session = requests.Session()
-    session.verify = False  # Disable certificate verification for testing
     data_dict = {}
 
     # Map available sources to fetching functions

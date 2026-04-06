@@ -5,7 +5,6 @@ google-auth-httplib2
 google-auth
 pytest
 requests
-logging
 httpx
 openai
 python-dotenv
@@ -14,3 +13,4 @@ selenium
 webdriver_manager
 beautifulsoup4
 lxml
+pytz

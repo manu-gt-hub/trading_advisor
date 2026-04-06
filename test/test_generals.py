@@ -63,7 +63,7 @@ def test_decide_final_action():
     assert decide_final_action('SELL', 'SELL') == 'SELL'
     assert decide_final_action('HOLD', 'HOLD') == 'HOLD'
 
-    # One is None or error
+    # One is None or error — single valid LLM, no custom
     assert decide_final_action(None, 'BUY') == 'BUY'
     assert decide_final_action('SELL', None) == 'SELL'
     assert decide_final_action('error', 'HOLD') == 'HOLD'
@@ -71,15 +71,36 @@ def test_decide_final_action():
     assert decide_final_action(None, 'error') == 'EMPTY_DECISION'
     assert decide_final_action('error', None) == 'EMPTY_DECISION'
 
-    # Both different and valid
-    assert decide_final_action('BUY', 'SELL') == 'EMPTY_DECISION'
-    assert decide_final_action('SELL', 'HOLD') == 'EMPTY_DECISION'
-    assert decide_final_action('HOLD', 'BUY') == 'EMPTY_DECISION'
+    # Both different and valid — conservative logic
+    assert decide_final_action('BUY', 'SELL') == 'HOLD'   # BUY vs SELL → conservative HOLD
+    assert decide_final_action('SELL', 'HOLD') == 'SELL'   # SELL vs HOLD → risk mgmt SELL
+    assert decide_final_action('HOLD', 'BUY') == 'HOLD'    # HOLD vs BUY → conservative HOLD
 
     # Both None or error
     assert decide_final_action(None, None) == 'EMPTY_DECISION'
     assert decide_final_action('error', 'error') == 'EMPTY_DECISION'
     assert decide_final_action(None, 'error') == 'EMPTY_DECISION'
+
+
+def test_decide_final_action_with_custom_tiebreaker():
+    # Custom breaks tie when LLMs disagree
+    assert decide_final_action('BUY', 'SELL', custom_decision='BUY') == 'BUY'
+    assert decide_final_action('BUY', 'SELL', custom_decision='SELL') == 'SELL'
+    assert decide_final_action('BUY', 'HOLD', custom_decision='HOLD') == 'HOLD'
+    assert decide_final_action('SELL', 'HOLD', custom_decision='SELL') == 'SELL'
+
+    # Custom disagrees with both LLMs: use custom only if high confidence
+    assert decide_final_action('BUY', 'HOLD', custom_decision='SELL', custom_confidence=0.5) == 'SELL'
+    assert decide_final_action('BUY', 'HOLD', custom_decision='SELL', custom_confidence=0.2) == 'HOLD'
+
+    # No valid LLMs, fall back to custom
+    assert decide_final_action(None, 'error', custom_decision='BUY') == 'BUY'
+    assert decide_final_action('error', None, custom_decision='SELL') == 'SELL'
+
+    # Single LLM + custom disagree → conservative HOLD
+    assert decide_final_action('BUY', None, custom_decision='SELL') == 'HOLD'
+    # Single LLM + custom agree on SELL → SELL
+    assert decide_final_action('SELL', None, custom_decision='SELL') == 'SELL'
 
 
 
@@ -89,7 +110,7 @@ def test_generate_action_column_default():
     df_test = pd.DataFrame(test_data)
     df_result = generate_action_column(df_test.copy(), "DEFAULT")
 
-    expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'EMPTY_DECISION', 'EMPTY_DECISION']
+    expected = ['SELL', 'BUY', 'SELL', 'HOLD', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
@@ -110,13 +131,6 @@ def test_generate_action_column_force_llm_2():
     expected = ['SELL', 'BUY', 'SELL', 'BUY', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[LLM2] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
-
-import pandas as pd
-from datetime import datetime
-
-import pandas as pd
-
-import pandas as pd
 
 def test_add_urls_column_builds_tradingview_urls_correctly():
     # Arrange: create a sample buy DataFrame
