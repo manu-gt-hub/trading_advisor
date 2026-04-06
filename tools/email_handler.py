@@ -51,6 +51,7 @@ def send_trading_advices_via_email(
 
         # Send the email to each recipient
         for recipient_email in recipient_emails:
+            del msg['To']
             msg['To'] = recipient_email
             server.sendmail(sender_email, recipient_email, msg.as_string())
 

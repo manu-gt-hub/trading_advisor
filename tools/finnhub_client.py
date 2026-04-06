@@ -68,7 +68,7 @@ def analyze_market_losers_from_interest_list(symbols, top_n=None):
     # Sort the list by most negative change
     losers.sort(key=lambda x: x["change_percent"])
     
-    logger.info(f"✅  succesfully got market losers")
+    logger.info(f"✅  successfully got market losers")
 
     if top_n is None:
         return losers  # return full list

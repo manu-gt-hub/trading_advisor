@@ -41,10 +41,10 @@ Welcome to this example repository demonstrating how to deploy and run a Large L
    pytest --log-cli-level=DEBUG
 
    # 5. Run a specific test file
-   pytest tests/test_google_handler.py
+   pytest test/test_google_handler.py
 
    # 6. Run a specific test function inside a test file
-   pytest tests/test_google_handler.py::test_load_data_real
+   pytest test/test_google_handler.py::test_load_data_real
 
    # 7. Run tests and stop after first failure
    pytest -x

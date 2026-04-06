@@ -8,12 +8,6 @@ from dotenv import load_dotenv
 if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
     load_dotenv()
 
-# Ensure API key is available
-def check_api_key():
-    api_key = os.environ.get("FINNHUB_API_KEY")
-    if not api_key:
-        pytest.fail("❌ FINNHUB_API_KEY not set in environment")
-
 def test_returns_list():
     losers = analyze_market_losers_from_interest_list(SYMBOLS_INTEREST_LIST, top_n=1)
     assert isinstance(losers, list), "Function should return a list"
