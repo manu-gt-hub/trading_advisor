@@ -78,6 +78,52 @@ def extract_custom_decision(opinion):
         return None
     return opinion.split(' ')[1].strip().upper()  # Returns 'SELL', 'BUY', etc.
 
+def extract_custom_confidence(opinion):
+    """Extract the confidence float from a custom label like '0.45 BUY'."""
+    if not isinstance(opinion, str):
+        return 0.0
+    try:
+        return float(opinion.split(' ')[0].strip())
+    except (ValueError, IndexError):
+        return 0.0
+
+def apply_technical_filter(llm_decision, custom_opinion):
+    """
+    Apply the technical evaluation as a safety filter over the LLM decision.
+    Rules:
+      - If LLM says BUY but technical says SELL with confidence >= 0.3 → HOLD
+      - If LLM says BUY but technical says HOLD with confidence >= 0.4 → HOLD
+      - If LLM says SELL but technical says BUY with high confidence >= 0.5 → HOLD
+      - Otherwise, trust the LLM decision
+    """
+    custom_decision = extract_custom_decision(custom_opinion)
+    custom_conf = extract_custom_confidence(custom_opinion)
+
+    error_values = [None, 'error', 'ERROR', 'EMPTY_DECISION', 'EVALUATION_FAILED']
+
+    if llm_decision in error_values:
+        return llm_decision
+
+    if custom_decision in error_values:
+        return llm_decision
+
+    # LLM says BUY — technical can veto
+    if llm_decision == 'BUY':
+        if custom_decision == 'SELL' and custom_conf >= 0.3:
+            logger.info(f"Technical filter: vetoed BUY → HOLD (technical={custom_decision}, conf={custom_conf:.2f})")
+            return 'HOLD'
+        if custom_decision == 'HOLD' and custom_conf >= 0.4:
+            logger.info(f"Technical filter: vetoed BUY → HOLD (technical={custom_decision}, conf={custom_conf:.2f})")
+            return 'HOLD'
+
+    # LLM says SELL — technical can soften
+    if llm_decision == 'SELL':
+        if custom_decision == 'BUY' and custom_conf >= 0.5:
+            logger.info(f"Technical filter: softened SELL → HOLD (technical={custom_decision}, conf={custom_conf:.2f})")
+            return 'HOLD'
+
+    return llm_decision
+
 # Function to decide final action based on both opinions
 def decide_final_action(llm_decision, llm_2_decision, custom_decision=None, custom_confidence=None):
     error_values = [None, 'error', 'ERROR', 'EMPTY_DECISION', 'EVALUATION_FAILED']
@@ -155,9 +201,15 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     logger.debug(f"Opinion type: {opinion_type}")
 
     if opinion_type == "LLM1":
-        logger.debug("set decision logic as LLM-1")
+        logger.debug("set decision logic as LLM-1 with technical filter")
 
         df['action'] = df['llm_opinion'].apply(extract_llm_decision)
+        # Apply technical filter if manual_financial_analysis column exists
+        if 'manual_financial_analysis' in df.columns:
+            df['action'] = df.apply(
+                lambda row: apply_technical_filter(row['action'], row['manual_financial_analysis']),
+                axis=1
+            )
 
     elif opinion_type == "LLM2":
         logger.debug("set decision logic as LLM-2")

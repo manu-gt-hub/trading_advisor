@@ -63,8 +63,9 @@ def enrich_analysis_df(df, analysis, force_opinion):
 
         general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
 
-        # TODO: enhance manual calculations
-        #general.add_opinion(symbol, df, "manual_financial_analysis", metrics["evaluation"])
+        # Technical evaluation as safety filter over LLM decision
+        custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']}"
+        general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
 
         # TODO: implement second LLM optinion
         #general.add_opinion(symbol, df, "llm_2_opinion", llm_opinion)
