@@ -10,6 +10,8 @@ from general import (
     extract_trading_view_decision,
     extract_llm_decision,
     extract_custom_decision,
+    extract_custom_confidence,
+    apply_technical_filter,
     decide_final_action,
     generate_action_column,
     add_urls_column
@@ -114,14 +116,75 @@ def test_generate_action_column_default():
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
-# Test: generate_action_column with force_opinion = LLM1
+# Test: extract_custom_confidence
+def test_extract_custom_confidence():
+    assert extract_custom_confidence('0.45 BUY') == 0.45
+    assert extract_custom_confidence('-0.30 SELL') == -0.30
+    assert extract_custom_confidence('0.00 HOLD') == 0.0
+    assert extract_custom_confidence(None) == 0.0
+    assert extract_custom_confidence('invalid') == 0.0
+    assert extract_custom_confidence(123) == 0.0
+
+
+# Test: apply_technical_filter
+def test_apply_technical_filter():
+    # LLM BUY, technical SELL with conf >= 0.3 → vetoed to HOLD
+    assert apply_technical_filter('BUY', '0.35 SELL') == 'HOLD'
+    # LLM BUY, technical SELL with low conf → trust LLM
+    assert apply_technical_filter('BUY', '0.20 SELL') == 'BUY'
+    # LLM BUY, technical HOLD with conf >= 0.4 → vetoed to HOLD
+    assert apply_technical_filter('BUY', '0.50 HOLD') == 'HOLD'
+    # LLM BUY, technical HOLD with low conf → trust LLM
+    assert apply_technical_filter('BUY', '0.30 HOLD') == 'BUY'
+    # LLM BUY, technical BUY → trust LLM (agreement)
+    assert apply_technical_filter('BUY', '0.60 BUY') == 'BUY'
+    # LLM SELL, technical BUY with conf >= 0.5 → softened to HOLD
+    assert apply_technical_filter('SELL', '0.55 BUY') == 'HOLD'
+    # LLM SELL, technical BUY with low conf → trust LLM
+    assert apply_technical_filter('SELL', '0.30 BUY') == 'SELL'
+    # LLM SELL, technical SELL → trust LLM (agreement)
+    assert apply_technical_filter('SELL', '0.80 SELL') == 'SELL'
+    # LLM HOLD → always trust HOLD (no filter needed)
+    assert apply_technical_filter('HOLD', '0.80 BUY') == 'HOLD'
+    # Error LLM decision → pass through
+    assert apply_technical_filter(None, '0.50 BUY') is None
+    # No custom data → trust LLM
+    assert apply_technical_filter('BUY', None) == 'BUY'
+
+
+# Test: generate_action_column with force_opinion = LLM1 (no technical filter)
 def test_generate_action_column_force_llm():
     df_test = pd.DataFrame(test_data)
     df_result = generate_action_column(df_test.copy(), opinion_type="LLM1")
 
+    # Without manual_financial_analysis column, no filter is applied
     expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[LLM] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
+
+
+# Test: generate_action_column with force_opinion = LLM1 + technical filter
+def test_generate_action_column_force_llm_with_filter():
+    df_test = pd.DataFrame({
+        'symbol': ['AAPL', 'MSFT', 'GOOGL', 'AMZN'],
+        'llm_opinion': [
+            'BUY - Strong momentum.',           # BUY, technical SELL high conf → HOLD
+            'BUY - All indicators up.',          # BUY, technical BUY → BUY
+            'SELL - Bearish trend.',              # SELL, technical BUY high conf → HOLD
+            'SELL - Weak momentum.',              # SELL, technical SELL → SELL
+        ],
+        'manual_financial_analysis': [
+            '0.40 SELL',   # vetoes BUY
+            '0.60 BUY',    # confirms BUY
+            '0.55 BUY',    # softens SELL
+            '0.70 SELL',   # confirms SELL
+        ],
+    })
+    df_result = generate_action_column(df_test.copy(), opinion_type="LLM1")
+
+    expected = ['HOLD', 'BUY', 'HOLD', 'SELL']
+    for i, exp in enumerate(expected):
+        assert df_result.loc[i, 'action'] == exp, f"[LLM1+filter] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
 # Test: generate_action_column with force_opinion = LLM2
 def test_generate_action_column_force_llm_2():
