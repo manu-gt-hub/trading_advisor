@@ -29,7 +29,8 @@ jobs:
       LOG_LEVEL:  ${{ vars.LOG_LEVEL }} 
       FORCE_OPINION: ${{ vars.FORCE_OPINION }}   
       GPT_MODEL_NAME: ${{ vars.GPT_MODEL_NAME }}
-      TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}      
+      TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
+      MIN_BUY_CONFIDENCE: ${{ vars.MIN_BUY_CONFIDENCE }}
       
 
     steps:
