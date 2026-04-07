@@ -28,6 +28,7 @@ def load_config():
         "buy_file_id": os.environ.get("BUY_RECOMMENDATIONS_ID"),
         "analysis_file_id": os.environ.get("ANALYSIS_FILE_ID"),
         "force_opinion": os.environ.get("FORCE_OPINION"),
+        "min_buy_confidence": float(os.environ.get("MIN_BUY_CONFIDENCE", 0.5)),
     }
 
 def analyze_symbol(symbol_data):
@@ -67,6 +68,9 @@ def enrich_analysis_df(df, analysis, force_opinion):
         custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']}"
         general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
 
+        # Store numeric confidence for filtering
+        df.loc[df['symbol'] == symbol, 'technical_confidence'] = metrics['confidence']
+
         # TODO: implement second LLM optinion
         #general.add_opinion(symbol, df, "llm_2_opinion", llm_opinion)
 
@@ -101,8 +105,22 @@ def main(show_dataframes=False):
     # Enrich analysis_df with opinions
     analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])
 
-    # Filter to only BUY recommendations
-    buy_df = analysis_df[analysis_df['action'] == 'BUY'].copy()
+    # Filter to only BUY recommendations with sufficient confidence
+    min_conf = config["min_buy_confidence"]
+    buy_df = analysis_df[
+        (analysis_df['action'] == 'BUY') &
+        (analysis_df['technical_confidence'] >= min_conf)
+    ].copy()
+
+    # Log filtered-out low-confidence BUYs
+    low_conf_buys = analysis_df[
+        (analysis_df['action'] == 'BUY') &
+        (analysis_df['technical_confidence'] < min_conf)
+    ]
+    for _, row in low_conf_buys.iterrows():
+        config['logger'].info(
+            f"Filtered out BUY for {row['symbol']}: confidence {row['technical_confidence']:.2f} < {min_conf}"
+        )
     buy_df['buy_date'] = now_madrid
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
     buy_date_col = buy_df.pop('buy_date')
