@@ -6,6 +6,7 @@ import pandas as pd
 import logging
 from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms
 from tools.general import extract_llm_confidence
+from tools.risk_management import compute_stop_loss_take_profit, filter_correlated_buys
 import numpy as np
 
 
@@ -75,8 +76,12 @@ def enrich_analysis_df(df, analysis, force_opinion):
         # Store numeric confidence for filtering
         df.loc[df['symbol'] == symbol, 'technical_confidence'] = metrics['confidence']
 
-        # TODO: implement second LLM optinion
-        #general.add_opinion(symbol, df, "llm_2_opinion", llm_opinion)
+        # Compute stop-loss and take-profit levels
+        atr = metrics['signals'].get('ATR_14')
+        sl_tp = compute_stop_loss_take_profit(item['current_price'], atr, revenue_percentage=os.environ.get('REVENUE_PERCENTAGE'))
+        df.loc[df['symbol'] == symbol, 'stop_loss'] = sl_tp['stop_loss']
+        df.loc[df['symbol'] == symbol, 'take_profit'] = sl_tp['take_profit']
+        df.loc[df['symbol'] == symbol, 'risk_reward_ratio'] = sl_tp['risk_reward_ratio']
 
     return general.generate_action_column(df, force_opinion)
 
@@ -131,6 +136,10 @@ def main(show_dataframes=False):
     buy_df.insert(2, 'buy_date', buy_date_col)
 
     buy_df = general.add_urls_column(buy_df)
+
+    # Diversification filter: remove highly correlated BUYs
+    if len(buy_df) >= 2:
+        buy_df = filter_correlated_buys(buy_df, max_correlation=0.75)
 
     # Update and save all outputs
     update_and_save_transactions(config, symbols_info_list, buy_df, now_madrid)

@@ -131,6 +131,49 @@ def _detect_candlestick_patterns(df):
     return patterns
 
 
+def _compute_weekly_confirmation(df):
+    """
+    Resample daily data to weekly and compute key indicators for multi-timeframe confirmation.
+    Returns a dict with weekly trend signals or None if insufficient data.
+    """
+    try:
+        wdf = df.copy()
+        wdf = wdf.set_index("date")
+        weekly = wdf["close"].resample("W").last().dropna()
+        if len(weekly) < 30:
+            return None
+
+        ma10w = weekly.rolling(10).mean()   # ~50 daily
+        ma30w = weekly.rolling(30).mean()   # ~150 daily
+
+        delta = weekly.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.rolling(14).mean()
+        avg_loss = loss.rolling(14).mean()
+        rs = avg_gain / avg_loss
+        rsi_w = 100 - (100 / (1 + rs))
+
+        latest_close = weekly.iloc[-1]
+        latest_ma10 = ma10w.iloc[-1]
+        latest_ma30 = ma30w.iloc[-1]
+        latest_rsi = rsi_w.iloc[-1]
+
+        if pd.isna(latest_ma10) or pd.isna(latest_ma30) or pd.isna(latest_rsi):
+            return None
+
+        return {
+            "weekly_trend_bullish": latest_ma10 > latest_ma30,
+            "weekly_price_above_ma10": latest_close > latest_ma10,
+            "weekly_rsi": latest_rsi,
+            "weekly_ma10": float(latest_ma10),
+            "weekly_ma30": float(latest_ma30),
+        }
+    except Exception as e:
+        logger.warning(f"Weekly confirmation failed: {e}")
+        return None
+
+
 def _get_sp500_trend():
     """Fetch S&P500 recent data and determine market trend."""
     try:
@@ -344,6 +387,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         candle_patterns = _detect_candlestick_patterns(df)
 
         # -------------------------
+        # NEW: Weekly timeframe confirmation
+        # -------------------------
+        weekly_conf = _compute_weekly_confirmation(df)
+
+        # -------------------------
         # NEW: S&P500 market context
         # -------------------------
         market_trend, market_score = _get_sp500_trend()
@@ -385,6 +433,12 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "Fib_618": fib_levels["fib_618"],
             "Market_Trend": market_trend or "UNKNOWN",
         }
+        if weekly_conf:
+            signals_dict["Weekly_Trend_Bullish"] = weekly_conf["weekly_trend_bullish"]
+            signals_dict["Weekly_Price_Above_MA10"] = weekly_conf["weekly_price_above_ma10"]
+            signals_dict["Weekly_RSI"] = round(float(weekly_conf["weekly_rsi"]), 2)
+            signals_dict["Weekly_MA10"] = round(weekly_conf["weekly_ma10"], 4)
+            signals_dict["Weekly_MA30"] = round(weekly_conf["weekly_ma30"], 4)
         if has_volume:
             signals_dict["Volume"] = latest["volume"]
             signals_dict["Vol_SMA_20"] = latest["vol_sma_20"]
@@ -604,6 +658,28 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         else:
             active_signals.append(f"⚠️ Low historical monthly +10% probability: {monthly_10pct_prob:.1%}")
             sell_score += 0.25
+
+        # --- WEEKLY TIMEFRAME CONFIRMATION ---
+        if weekly_conf:
+            w_trend = weekly_conf["weekly_trend_bullish"]
+            w_above = weekly_conf["weekly_price_above_ma10"]
+            w_rsi = weekly_conf["weekly_rsi"]
+
+            if w_trend and w_above:
+                active_signals.append(f"✅ Weekly trend BULLISH (MA10w > MA30w, price above MA10w)")
+                buy_score += 1.5
+            elif not w_trend and not w_above:
+                active_signals.append(f"❌ Weekly trend BEARISH (MA10w < MA30w, price below MA10w)")
+                sell_score += 1.5
+            else:
+                active_signals.append(f"⚠️ Weekly trend mixed (trend={'up' if w_trend else 'down'}, price={'above' if w_above else 'below'} MA10w)")
+
+            if w_rsi < 30:
+                active_signals.append(f"✅ Weekly RSI oversold ({w_rsi:.1f})")
+                buy_score += 0.5
+            elif w_rsi > 70:
+                active_signals.append(f"❌ Weekly RSI overbought ({w_rsi:.1f})")
+                sell_score += 0.5
 
         # --- MARKET CONTEXT (S&P500) ---
         if market_trend:
