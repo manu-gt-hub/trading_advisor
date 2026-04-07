@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 't
 from general import (
     extract_trading_view_decision,
     extract_llm_decision,
+    extract_llm_confidence,
     extract_custom_decision,
     extract_custom_confidence,
     apply_technical_filter,
@@ -49,13 +50,31 @@ def test_extract_trading_view_decision():
 
 # Test: extract_llm_decision
 def test_extract_llm_decision():
+    # Old format: "DECISION - explanation"
     assert extract_llm_decision('sell - Something something') == 'SELL'
     assert extract_llm_decision('buy - More text here') == 'BUY'
-    assert extract_llm_decision('neutral - Sideways trend') == 'NEUTRAL'
     assert extract_llm_decision('SELL- No space') == 'SELL'
     assert extract_llm_decision('   buy -  Extra spaces   ') == 'BUY'
+    # New format: "75% BUY - explanation"
+    assert extract_llm_decision('75% BUY - Strong momentum') == 'BUY'
+    assert extract_llm_decision('30% SELL - Bearish trend') == 'SELL'
+    assert extract_llm_decision('50% HOLD - Mixed signals') == 'HOLD'
+    # Edge cases
     assert extract_llm_decision(None) is None
-    assert extract_llm_decision('') == ''
+    assert extract_llm_decision('') == 'EMPTY_DECISION'
+    assert extract_llm_decision('neutral - Sideways') == 'EMPTY_DECISION'
+
+
+# Test: extract_llm_confidence
+def test_extract_llm_confidence():
+    assert extract_llm_confidence('75% BUY - Strong momentum') == 0.75
+    assert extract_llm_confidence('30% SELL - Bearish trend') == 0.30
+    assert extract_llm_confidence('100% BUY - All signals aligned') == 1.0
+    assert extract_llm_confidence('0% HOLD - No conviction') == 0.0
+    # Old format without confidence → default 0.5
+    assert extract_llm_confidence('BUY - Strong momentum') == 0.5
+    assert extract_llm_confidence(None) == 0.5
+    assert extract_llm_confidence('') == 0.5
 
 
 # Test: decide_final_action
@@ -107,12 +126,26 @@ def test_decide_final_action_with_custom_tiebreaker():
 
 
 
-# Test: generate_action_column (default logic)
+# Test: generate_action_column (DEFAULT = consensus LLM + technical)
 def test_generate_action_column_default():
-    df_test = pd.DataFrame(test_data)
+    df_test = pd.DataFrame({
+        'symbol': ['AAPL', 'MSFT', 'GOOGL', 'AMZN'],
+        'llm_opinion': [
+            'BUY - Strong momentum.',           # BUY, technical SELL → HOLD (disagreement)
+            'BUY - All indicators up.',          # BUY, technical BUY → BUY (consensus)
+            'SELL - Bearish trend.',              # SELL, technical BUY → HOLD (disagreement)
+            'SELL - Weak momentum.',              # SELL, technical SELL → SELL (consensus)
+        ],
+        'manual_financial_analysis': [
+            '0.40 SELL',
+            '0.60 BUY',
+            '0.55 BUY',
+            '0.70 SELL',
+        ],
+    })
     df_result = generate_action_column(df_test.copy(), "DEFAULT")
 
-    expected = ['SELL', 'BUY', 'SELL', 'HOLD', 'EMPTY_DECISION']
+    expected = ['HOLD', 'BUY', 'HOLD', 'SELL']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
@@ -126,65 +159,73 @@ def test_extract_custom_confidence():
     assert extract_custom_confidence(123) == 0.0
 
 
-# Test: apply_technical_filter
+# Test: apply_technical_filter (consensus logic with confidence weighting)
 def test_apply_technical_filter():
-    # LLM BUY, technical SELL with conf >= 0.3 → vetoed to HOLD
-    assert apply_technical_filter('BUY', '0.35 SELL') == 'HOLD'
-    # LLM BUY, technical SELL with low conf → trust LLM
-    assert apply_technical_filter('BUY', '0.20 SELL') == 'BUY'
-    # LLM BUY, technical HOLD with conf >= 0.4 → vetoed to HOLD
-    assert apply_technical_filter('BUY', '0.50 HOLD') == 'HOLD'
-    # LLM BUY, technical HOLD with low conf → trust LLM
-    assert apply_technical_filter('BUY', '0.30 HOLD') == 'BUY'
-    # LLM BUY, technical BUY → trust LLM (agreement)
+    # === CONSENSUS: BUY only when both agree ===
+    # LLM BUY(0.5) + technical BUY(0.6) → BUY (both agree)
     assert apply_technical_filter('BUY', '0.60 BUY') == 'BUY'
-    # LLM SELL, technical BUY with conf >= 0.5 → softened to HOLD
-    assert apply_technical_filter('SELL', '0.55 BUY') == 'HOLD'
-    # LLM SELL, technical BUY with low conf → trust LLM
-    assert apply_technical_filter('SELL', '0.30 BUY') == 'SELL'
-    # LLM SELL, technical SELL → trust LLM (agreement)
+    # LLM BUY(0.5) + technical SELL(0.35) → HOLD (disagreement)
+    assert apply_technical_filter('BUY', '0.35 SELL') == 'HOLD'
+    # LLM BUY(0.5) + technical HOLD(0.50) → HOLD (not enough consensus)
+    assert apply_technical_filter('BUY', '0.50 HOLD') == 'HOLD'
+
+    # === CONSENSUS: SELL only when both agree ===
+    # LLM SELL(0.5) + technical SELL(0.8) → SELL (both agree)
     assert apply_technical_filter('SELL', '0.80 SELL') == 'SELL'
-    # LLM HOLD → always trust HOLD (no filter needed)
-    assert apply_technical_filter('HOLD', '0.80 BUY') == 'HOLD'
-    # Error LLM decision → pass through
-    assert apply_technical_filter(None, '0.50 BUY') is None
-    # No custom data → trust LLM
+    # LLM SELL(0.5) + technical BUY(0.55) → HOLD (disagreement)
+    assert apply_technical_filter('SELL', '0.55 BUY') == 'HOLD'
+
+    # === LLM confidence matters ===
+    # High-conf LLM BUY(0.9) + low-conf technical HOLD(0.1) → BUY (LLM dominates)
+    assert apply_technical_filter('BUY', '0.10 HOLD', llm_confidence=0.9) == 'BUY'
+    # Low-conf LLM BUY(0.2) + high-conf technical SELL(0.8) → SELL (technical dominates)
+    assert apply_technical_filter('BUY', '0.80 SELL', llm_confidence=0.2) == 'SELL'
+    # Equal conf, disagreement → HOLD
+    assert apply_technical_filter('BUY', '0.50 SELL', llm_confidence=0.5) == 'HOLD'
+
+    # === HOLD from LLM, strong technical can promote ===
+    # LLM HOLD(0.3) + technical BUY(0.8) → BUY (technical strong enough)
+    assert apply_technical_filter('HOLD', '0.80 BUY', llm_confidence=0.3) == 'BUY'
+    # LLM HOLD(0.3) + technical SELL(0.8) → SELL (technical strong enough)
+    assert apply_technical_filter('HOLD', '0.80 SELL', llm_confidence=0.3) == 'SELL'
+
+    # === Error/fallback cases ===
+    assert apply_technical_filter(None, '0.50 BUY') == 'BUY'
+    assert apply_technical_filter(None, '0.30 BUY') is None
     assert apply_technical_filter('BUY', None) == 'BUY'
 
 
-# Test: generate_action_column with force_opinion = LLM1 (no technical filter)
+# Test: generate_action_column with force_opinion = LLM1 (GPT only, no consensus)
 def test_generate_action_column_force_llm():
     df_test = pd.DataFrame(test_data)
     df_result = generate_action_column(df_test.copy(), opinion_type="LLM1")
 
-    # Without manual_financial_analysis column, no filter is applied
+    # LLM1 = GPT only, ignores technical analysis
     expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
     for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'action'] == exp, f"[LLM] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
+        assert df_result.loc[i, 'action'] == exp, f"[LLM1] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
 
-# Test: generate_action_column with force_opinion = LLM1 + technical filter
-def test_generate_action_column_force_llm_with_filter():
+# Test: generate_action_column DEFAULT with consensus (LLM + technical)
+def test_generate_action_column_default_consensus():
     df_test = pd.DataFrame({
-        'symbol': ['AAPL', 'MSFT', 'GOOGL', 'AMZN'],
+        'symbol': ['AAPL', 'MSFT', 'GOOGL'],
         'llm_opinion': [
-            'BUY - Strong momentum.',           # BUY, technical SELL high conf → HOLD
-            'BUY - All indicators up.',          # BUY, technical BUY → BUY
-            'SELL - Bearish trend.',              # SELL, technical BUY high conf → HOLD
-            'SELL - Weak momentum.',              # SELL, technical SELL → SELL
+            'BUY - Strong momentum.',     # GPT=BUY, technical=HOLD → HOLD
+            'SELL - Weak trend.',          # GPT=SELL, technical=SELL → SELL
+            'BUY - Uptrend.',              # GPT=BUY, no technical → BUY (fallback)
         ],
         'manual_financial_analysis': [
-            '0.40 SELL',   # vetoes BUY
-            '0.60 BUY',    # confirms BUY
-            '0.55 BUY',    # softens SELL
-            '0.70 SELL',   # confirms SELL
+            '0.40 HOLD',
+            '0.70 SELL',
+            None,
         ],
     })
-    df_result = generate_action_column(df_test.copy(), opinion_type="LLM1")
+    df_result = generate_action_column(df_test.copy(), opinion_type="DEFAULT")
 
-    expected = ['HOLD', 'BUY', 'HOLD', 'SELL']
+    expected = ['HOLD', 'SELL', 'BUY']
     for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'action'] == exp, f"[LLM1+filter] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
+        assert df_result.loc[i, 'action'] == exp, f"[DEFAULT consensus] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
 # Test: generate_action_column with force_opinion = LLM2
 def test_generate_action_column_force_llm_2():
