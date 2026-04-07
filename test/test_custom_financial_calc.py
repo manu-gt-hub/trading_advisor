@@ -3,6 +3,7 @@ import os
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
+from unittest.mock import patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
 from tools.custom_financial_calc import review_transactions, evaluate_buy_interest
 
@@ -44,7 +45,9 @@ def load_hist_data():
     csv_path = os.path.join(current_dir, '..', 'resources', 'msft_hist_data.csv')
     return pd.read_csv(csv_path)
 
-def test_evaluate_buy_interest_returns_expected_structure():
+@patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
+@patch("tools.custom_financial_calc._get_sp500_trend", return_value=("BULLISH", 1.5))
+def test_evaluate_buy_interest_returns_expected_structure(mock_sp500, mock_weekly):
     df = load_hist_data()
     current_price = df['close'].iloc[-1]  # Latest close as current price
 
@@ -100,7 +103,9 @@ def test_evaluate_buy_interest_returns_expected_structure():
     assert round(result["signals"]["Current_Price"], 2) == round(current_price, 2)
 
 
-def test_evaluate_buy_interest_buy_or_sell_or_hold():
+@patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
+@patch("tools.custom_financial_calc._get_sp500_trend", return_value=("BULLISH", 1.5))
+def test_evaluate_buy_interest_buy_or_sell_or_hold(mock_sp500, mock_weekly):
     df = load_hist_data()
     current_price = df['close'].iloc[-1]
 
