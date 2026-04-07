@@ -1,102 +1,132 @@
-# Cloud LLM Deployment (<trading advisor)>
+# Trading Advisor
 
-Welcome to this example repository demonstrating how to deploy and run a Large Language Model (LLM) in the cloud! This project serves as a practical guide for setting up, deploying, and executing an LLM on cloud infrastructure, making it easy for developers and enthusiasts to learn and experiment.
+Automated stock trading signal generator that combines **LLM analysis (GPT)** with **quantitative technical analysis** to produce consensus-based BUY/HOLD/SELL recommendations. Runs daily via GitHub Actions and saves results to Google Drive.
 
 ## 🚀 Features
 
-- Step-by-step deployment instructions
-- Cloud setup for scalable LLM inference
-- Example scripts to interact with the deployed model
-- Basic monitoring and logging examples
-- Easily adaptable to different cloud providers and models
+### Decision Engine
+- **Consensus system** — Decisions require agreement between GPT and technical analysis, weighted by their respective confidence levels
+- **Three modes** via `FORCE_OPINION`: `DEFAULT` (consensus), `LLM1` (GPT only), `CUSTOM` (technical only)
+- **LLM confidence** — GPT returns a 0-100% conviction score that weights its vote in the consensus
+- **MIN_BUY_CONFIDENCE** — Filters out weak BUY signals below a configurable threshold
+
+### Technical Analysis (`custom_financial_calc.py`)
+- **Trend**: SMA 50/200, EMA 20, MA50 slope
+- **Momentum**: RSI, MACD (crossover + histogram), ROC 10, Stochastic RSI
+- **Volume**: OBV, volume breakout confirmation
+- **Volatility**: Bollinger Bands, ATR 14, historical volatility
+- **Support/Resistance**: Fibonacci retracements (38.2%, 50%, 61.8%)
+- **Patterns**: Candlestick detection (Hammer, Engulfing, Doji, Shooting Star)
+- **Trend Strength**: ADX with dynamic signal weighting (trending vs ranging regimes)
+- **Multi-timeframe**: Weekly MA10/MA30 and weekly RSI as confirmation layer
+- **Market Context**: S&P500 trend as macro filter
+
+### Risk Management (`risk_management.py`)
+- **Stop-loss**: ATR-based (2x ATR below entry)
+- **Take-profit**: Revenue percentage target or 3x ATR
+- **Position sizing**: Fixed-risk model with 20% portfolio cap per position
+- **Diversification**: Correlation filter removes highly correlated BUY signals (Pearson > 0.75)
+- **Risk/Reward ratio**: Computed for every signal
+
+### Backtesting (`backtesting.py`)
+- Simulates signals over historical data **without look-ahead bias**
+- Measures win rate, average return, max drawdown per trade
+- MSFT 5-year backtest results (10% target, 30-day hold):
+  - **Win rate**: 30% | **Avg return**: +2.06% | **Median return**: +2.76%
+  - Conservative: ~4 BUY signals/year
+
+### Infrastructure
+- **Daily execution** via GitHub Actions (scheduled cron)
+- **Google Drive** integration for persisting analysis and recommendations
+- **59 tests**, fully mocked (no external API calls), ~10s execution
 
 ## 🛠️ Getting Started
 
-### (usage documented at the bottom)
-
 ### Prerequisites
 
-- TBD
+- Python 3.11+
+- API keys: OpenAI, Finnhub, Alpha Vantage
+- Google Drive service account credentials
 
 ### Installation
 
-1. Clone the repository  
-   ```bash
-   git clone https://github.com/manu-gt-hub/llm_deployment_test.git
-   cd llm_deployment_test
+```bash
+git clone https://github.com/manu-gt-hub/trading_advisor.git
+cd trading_advisor
+pip install -r requirements.txt
+```
 
-### Useful commands
+### Environment Variables
 
-   ```bash
-   # 1. Run all tests
-   pytest
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI API key |
+| `GPT_MODEL_NAME` | GPT model (e.g., `gpt-4o`) |
+| `FINNHUB_API_KEY` | Finnhub API key |
+| `ALPHA_API_KEY` | Alpha Vantage API key |
+| `ALPHA_VANTAGE_URL` | Alpha Vantage base URL |
+| `GDRIVE_CREDENTIALS_JSON` | Google Drive service account JSON |
+| `GDRIVE_FILE_ID` | Transactions sheet ID |
+| `BUY_RECOMMENDATIONS_ID` | Buy recommendations sheet ID |
+| `ANALYSIS_FILE_ID` | Full analysis sheet ID |
+| `SYMBOLS_INTEREST_LIST` | Python list of tickers, e.g. `"['AAPL','MSFT']"` |
+| `REVENUE_PERCENTAGE` | Target profit % for take-profit (e.g., `10`) |
+| `FORCE_OPINION` | Decision mode: `DEFAULT`, `LLM1`, `LLM2`, `CUSTOM` |
+| `MIN_BUY_CONFIDENCE` | Minimum technical confidence to accept a BUY (0.0-1.0, default 0.5) |
+| `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
+| `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
 
-   # 2. Run tests with verbose output
-   pytest -v
+### Usage
 
-   # 3. Run tests showing logs at INFO level
-   pytest --log-cli-level=INFO
+1. Set environment variables (`.env` file or GitHub Actions secrets)
+2. Add symbols to `SYMBOLS_INTEREST_LIST`
+3. Add market mapping in `resources/symbols_markets.json`
+4. Run: `python main.py` (or `python main.py --test` for debug output)
 
-   # 4. Run tests showing logs at DEBUG level
-   pytest --log-cli-level=DEBUG
+### Google Drive Output
 
-   # 5. Run a specific test file
-   pytest test/test_google_handler.py
+| Sheet | Columns |
+|---|---|
+| **Analysis** | symbol, current_price, llm_opinion, llm_confidence, manual_financial_analysis, technical_confidence, stop_loss, take_profit, risk_reward_ratio, action |
+| **Buy Recommendations** | Same + buy_date, tradingview_url |
 
-   # 6. Run a specific test function inside a test file
-   pytest test/test_google_handler.py::test_load_data_real
+## 🧪 Tests
 
-   # 7. Run tests and stop after first failure
-   pytest -x
+```bash
+# Run all tests (excludes Google Drive integration tests)
+pytest test/ -v --ignore=test/test_google_handler.py
 
-   # 8. Run tests with coverage report (requires pytest-cov)
-   pytest --cov=your_package_name
+# Run with output visible
+pytest test/ -v -s --ignore=test/test_google_handler.py
 
-   # 9. Run the main Python script
-   python main.py
+# Run only backtesting tests
+pytest test/test_backtesting.py -v -s
 
-   # 10. Run main script overriding environment variable (Linux/macOS)
-   TRADING_ADVISOR_FOLDER_ID='your_folder_id' python main.py
+# Run E2E (requires all API keys)
+python main.py --test
+```
 
-   # Windows CMD
-   set TRADING_ADVISOR_FOLDER_ID=your_folder_id
-   python main.py
+All tests are mocked — no external API calls. Google Drive tests (`test_google_handler.py`) are integration tests excluded by default.
 
-   # 11. Run pytest setting LOG_LEVEL environment variable
-   LOG_LEVEL=DEBUG pytest
+## 📊 Architecture
 
-   # Windows CMD
-   set LOG_LEVEL=DEBUG
-   pytest
+```
+main.py                          # Entry point: orchestrates analysis pipeline
+tools/
+  custom_financial_calc.py       # Technical indicators + scoring engine
+  general.py                     # Consensus logic, decision extraction, action column
+  llms.py                        # GPT and DeepSeek API integration
+  risk_management.py             # Stop-loss, position sizing, correlation filter
+  backtesting.py                 # Historical signal simulation
+  historicals.py                 # Yahoo Finance + Alpha Vantage data fetching
+  finnhub_client.py              # Finnhub market data
+  google_handler.py              # Google Drive read/write
+  email_handler.py               # Email notifications
+test/                            # 59 tests, fully mocked
+resources/                       # CSV data, symbol mappings
+.github/workflows/               # CI (tests) + daily execution
+```
 
-   # 12. Run tests and generate JUnit XML report (for CI)
-   pytest --junitxml=reports/junit.xml
-   ```
+## ⚠️ Disclaimer
 
-### Documentation
-
-For detailed setup guides, architecture overview, and advanced usage, check out the /docs folder.
-
-### ⚠️ Disclaimer
-
-This repository is intended for educational and learning purposes only.
-It is not optimized for production use, security, or scalability. Use responsibly and at your own risk.
-
-### USAGE
-
-Steps:
-
-   - set variables for: Google drive space and files, finnhub, OpenAI, ALPHA vantage API key etc. 
-   - add symbol to the ENV variable: SYMBOLS_INTEREST_LIST
-   - add market related to symbol into the dictionary located on resources/symbols_markets.json
-   - an analysis_file and buy_recommendation files would be created on the folder
-   - (optional) force opinion for one LLM or another, or both as default if the opinion is equal
-   - final decision is evaluated on: generals.generate_action_column()
-   - to add/remove opinions, just use generals.add_opinion() over the final dataframe on main.py
-
-### TEST
-
-   - run: pytest in the terminal on the project root
-   - run (example): pytest test/test_general.py -s
-   - run E2E: python main.py --test
-
+This repository is for **educational and personal use only**. It is not financial advice. Trading involves risk of loss. Use responsibly and at your own risk.
