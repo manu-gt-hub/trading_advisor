@@ -256,7 +256,11 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     elif opinion_type == "LLM2":
         logger.debug("set decision logic as LLM-2")
 
-        df['action'] = df['llm_2_opinion'].apply(extract_llm_decision)
+        if 'llm_2_opinion' not in df.columns:
+            logger.warning("LLM2 mode selected but 'llm_2_opinion' column not found. Falling back to LLM1.")
+            df['action'] = df['llm_opinion'].apply(extract_llm_decision)
+        else:
+            df['action'] = df['llm_2_opinion'].apply(extract_llm_decision)
 
     elif opinion_type == "CUSTOM":
         logger.debug("set decision logic as CUSTOM (technical analysis only)")
