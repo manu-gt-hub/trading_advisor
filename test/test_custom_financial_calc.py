@@ -84,8 +84,17 @@ def test_evaluate_buy_interest_returns_expected_structure():
         "MACD_Hist_Slope",
         "BB_Upper",
         "BB_Lower",
+        "ADX",
+        "Plus_DI",
+        "Minus_DI",
+        "Stoch_RSI_K",
+        "Stoch_RSI_D",
+        "Fib_382",
+        "Fib_500",
+        "Fib_618",
+        "Market_Trend",
     ]:
-        assert key in result["signals"]
+        assert key in result["signals"], f"Missing signal key: {key}"
 
     # Sanity check: Current_Price should match the input
     assert round(result["signals"]["Current_Price"], 2) == round(current_price, 2)
