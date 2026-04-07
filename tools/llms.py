@@ -41,7 +41,8 @@ def generate_prompt(metrics, current_price, technical_evaluation=None, confidenc
         f"- SELL if bearish trend AND weak momentum AND no reversal signs.\n"
         f"- HOLD if signals are mixed, conflicting, or insufficient for a strong conviction.\n"
         f"- When in doubt, prefer HOLD over BUY. Avoiding bad trades matters more than catching every opportunity.\n\n"
-        f"Output format: DECISION - brief explanation (max 30 words, include key indicators in parentheses).\n"
+        f"Output format: CONFIDENCE% DECISION - brief explanation (max 30 words, include key indicators in parentheses).\n"
+        f"CONFIDENCE is your conviction level from 0 to 100 (e.g., 75% BUY - ...).\n"
         f"Options for DECISION: BUY, HOLD, SELL."
     )
 

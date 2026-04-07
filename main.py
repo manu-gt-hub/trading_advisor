@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import logging
 from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms
+from tools.general import extract_llm_confidence
 import numpy as np
 
 
@@ -63,6 +64,9 @@ def enrich_analysis_df(df, analysis, force_opinion):
             llm_opinion = "error: metrics not provided"
 
         general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
+
+        # Store LLM confidence
+        df.loc[df['symbol'] == symbol, 'llm_confidence'] = extract_llm_confidence(llm_opinion)
 
         # Technical evaluation as safety filter over LLM decision
         custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']}"
