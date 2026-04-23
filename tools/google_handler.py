@@ -21,7 +21,10 @@ def get_drive_service():
     creds_json = os.environ.get("GDRIVE_CREDENTIALS_JSON")
     if not creds_json:
         raise Exception("Environment variable GDRIVE_CREDENTIALS_JSON not found")
-    creds_dict = json.loads(creds_json)
+    try:
+        creds_dict = json.loads(creds_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        raise Exception(f"Invalid GDRIVE_CREDENTIALS_JSON format: {e}")
     credentials = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=["https://www.googleapis.com/auth/drive"]
     )
@@ -57,34 +60,41 @@ def load_data(file_id):
 def update_transactions(df_analysis, df_transactions, revenue_percentage):
     # Make a copy to avoid changing the original dataframe
     df_transactions = df_transactions.copy()
+
+    if revenue_percentage is None:
+        logger.warning("⚠️ revenue_percentage is None. Skipping transaction review.")
+        return df_transactions
     
     # Loop through each row in the transactions dataframe
     for idx, row in df_transactions.iterrows():
-        symbol = row['symbol']
-        buy_value = row['buy_value']
-        
-        # Skip if already sold
-        if pd.notna(row.get('sell_value')):
-            continue
-        
-        # Look for the symbol in the analysis dataframe
-        analysis_row = df_analysis[df_analysis['symbol'] == symbol]
-        
-        if not analysis_row.empty:
-            current_price = analysis_row.iloc[0]['current_price']
-            target_price = buy_value * (1 + float(revenue_percentage) / 100)
+        try:
+            symbol = row['symbol']
+            buy_value = row['buy_value']
             
-            if current_price >= target_price:
-                sell_date = datetime.today().date()
-                buy_date = pd.to_datetime(row['buy_date']).date()
-                days_diff = (sell_date - buy_date).days
-                percentage_benefit = ((current_price - buy_value) / buy_value) * 100
+            # Skip if already sold
+            if pd.notna(row.get('sell_value')):
+                continue
+            
+            # Look for the symbol in the analysis dataframe
+            analysis_row = df_analysis[df_analysis['symbol'] == symbol]
+            
+            if not analysis_row.empty:
+                current_price = analysis_row.iloc[0]['current_price']
+                target_price = buy_value * (1 + float(revenue_percentage) / 100)
+                
+                if current_price >= target_price:
+                    sell_date = datetime.today().date()
+                    buy_date = pd.to_datetime(row['buy_date']).date()
+                    days_diff = (sell_date - buy_date).days
+                    percentage_benefit = ((current_price - buy_value) / buy_value) * 100
 
-                # Update the transaction record
-                df_transactions.at[idx, 'sell_value'] = round(current_price, 2)
-                df_transactions.at[idx, 'sell_date'] = sell_date
-                df_transactions.at[idx, 'buy_sell_days_diff'] = days_diff
-                df_transactions.at[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
+                    # Update the transaction record
+                    df_transactions.at[idx, 'sell_value'] = round(current_price, 2)
+                    df_transactions.at[idx, 'sell_date'] = sell_date
+                    df_transactions.at[idx, 'buy_sell_days_diff'] = days_diff
+                    df_transactions.at[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
+        except Exception as e:
+            logger.error(f"❌ Error processing transaction row {idx}: {e}. Skipping.")
 
     return df_transactions
 
@@ -94,21 +104,27 @@ def save_dataframe_file_id(df, file_id):
     Updates an existing CSV file on Google Drive using in-memory upload (no temp file).
     Fully Windows-compatible.
     """
-    service = get_drive_service()
-    logger.info("saving data into google drive...")
-
     if not file_id:
-        raise Exception("❌ file_id not provided or environment variable GDRIVE_FILE_ID is missing.")
+        logger.error("❌ file_id not provided. Skipping save.")
+        return
 
-    # Write CSV to an in-memory bytes buffer
-    csv_buffer = io.BytesIO()
-    df.to_csv(csv_buffer, index=False)
-    csv_buffer.seek(0)  # Rewind to start
+    try:
+        service = get_drive_service()
+        logger.info("saving data into google drive...")
 
-    media = MediaIoBaseUpload(csv_buffer, mimetype='text/csv')
+        # Write CSV to an in-memory bytes buffer
+        csv_buffer = io.BytesIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)  # Rewind to start
 
-    updated_file = service.files().update(
-        fileId=file_id,
-        media_body=media
-    ).execute()
+        media = MediaIoBaseUpload(csv_buffer, mimetype='text/csv')
+
+        updated_file = service.files().update(
+            fileId=file_id,
+            media_body=media
+        ).execute()
+
+        logger.info(f"✅ Saved to Google Drive (file_id={file_id})")
+    except Exception as e:
+        logger.error(f"❌ Failed to save to Google Drive (file_id={file_id}): {e}")
 
