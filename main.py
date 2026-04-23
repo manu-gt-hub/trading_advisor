@@ -34,71 +34,99 @@ def load_config():
     }
 
 def analyze_symbol(symbol_data):
-    """Analyze a single stock symbol."""
+    """Analyze a single stock symbol. Returns None if analysis fails."""
     symbol = symbol_data['symbol']
     current_price = symbol_data['current_price']
     #normalize symbol in cases like: RHM.DE
     symbol = symbol.split(".")[0]
 
-    hist_data = historicals.get_historical_data(symbol)
-    metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price)
+    try:
+        hist_data = historicals.get_historical_data(symbol)
+        if hist_data is None or hist_data.empty:
+            logging.getLogger(__name__).warning(f"⚠️ No historical data for {symbol}. Skipping.")
+            return None
 
-    return {
-        "symbol": symbol,
-        "current_price": current_price,
-        "metrics": metrics,
-    }
+        metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price)
+
+        return {
+            "symbol": symbol,
+            "current_price": current_price,
+            "metrics": metrics,
+        }
+    except Exception as e:
+        logging.getLogger(__name__).error(f"❌ Analysis failed for {symbol}: {e}. Skipping.")
+        return None
 
 def enrich_analysis_df(df, analysis, force_opinion):
     """Add analysis opinions to the DataFrame."""
+    logger = logging.getLogger(__name__)
+
     for item in analysis:
         symbol = item["symbol"]
-        metrics = item["metrics"]
+        try:
+            metrics = item["metrics"]
 
-        if "failed" not in metrics["evaluation"]:
-            llm_opinion = llms.get_gpt_signals_analysis(
-                metrics["signals"], symbol, item["current_price"],
-                technical_evaluation=metrics["evaluation"],
-                confidence=metrics["confidence"]
-            )
-        else:
-            llm_opinion = "error: metrics not provided"
+            if "failed" not in metrics["evaluation"]:
+                llm_opinion = llms.get_gpt_signals_analysis(
+                    metrics["signals"], symbol, item["current_price"],
+                    technical_evaluation=metrics["evaluation"],
+                    confidence=metrics["confidence"]
+                )
+            else:
+                llm_opinion = "error: metrics not provided"
 
-        general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
+            general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
 
-        # Store LLM confidence
-        df.loc[df['symbol'] == symbol, 'llm_confidence'] = extract_llm_confidence(llm_opinion)
+            # Store LLM confidence
+            df.loc[df['symbol'] == symbol, 'llm_confidence'] = extract_llm_confidence(llm_opinion)
 
-        # Technical evaluation as safety filter over LLM decision
-        custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']}"
-        general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
+            # Technical evaluation as safety filter over LLM decision
+            custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']}"
+            general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
 
-        # Store numeric confidence for filtering
-        df.loc[df['symbol'] == symbol, 'technical_confidence'] = metrics['confidence']
+            # Store numeric confidence for filtering
+            df.loc[df['symbol'] == symbol, 'technical_confidence'] = metrics['confidence']
 
-        # Compute stop-loss and take-profit levels
-        atr = metrics['signals'].get('ATR_14')
-        sl_tp = compute_stop_loss_take_profit(item['current_price'], atr, revenue_percentage=os.environ.get('REVENUE_PERCENTAGE'))
-        df.loc[df['symbol'] == symbol, 'stop_loss'] = sl_tp['stop_loss']
-        df.loc[df['symbol'] == symbol, 'take_profit'] = sl_tp['take_profit']
-        df.loc[df['symbol'] == symbol, 'risk_reward_ratio'] = sl_tp['risk_reward_ratio']
+            # Compute stop-loss and take-profit levels
+            atr = metrics['signals'].get('ATR_14')
+            sl_tp = compute_stop_loss_take_profit(item['current_price'], atr, revenue_percentage=os.environ.get('REVENUE_PERCENTAGE'))
+            df.loc[df['symbol'] == symbol, 'stop_loss'] = sl_tp['stop_loss']
+            df.loc[df['symbol'] == symbol, 'take_profit'] = sl_tp['take_profit']
+            df.loc[df['symbol'] == symbol, 'risk_reward_ratio'] = sl_tp['risk_reward_ratio']
+        except Exception as e:
+            logger.error(f"❌ Error enriching {symbol}: {e}. Skipping.")
 
     return general.generate_action_column(df, force_opinion)
 
 def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
-    transactions_df = google_handler.load_data(config["transactions_file_id"])
-    update_df = pd.DataFrame(analysis_df)
+    logger = logging.getLogger(__name__)
+    try:
+        transactions_df = google_handler.load_data(config["transactions_file_id"])
+        if transactions_df is None:
+            logger.error("❌ Could not load transactions from Google Drive. Skipping transaction update.")
+            return
 
-    trans_updated_df = google_handler.update_transactions(update_df, transactions_df, config["revenue_percentage"])
+        update_df = pd.DataFrame(analysis_df)
 
-    final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
-                 .sort_values(by='buy_date', ascending=False).head(config["max_records"])
+        trans_updated_df = google_handler.update_transactions(update_df, transactions_df, config["revenue_percentage"])
 
-    google_handler.save_dataframe_file_id(final_df, config["transactions_file_id"])
+        final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
+                     .sort_values(by='buy_date', ascending=False).head(config["max_records"])
+
+        google_handler.save_dataframe_file_id(final_df, config["transactions_file_id"])
+    except Exception as e:
+        logger.error(f"❌ Failed to update/save transactions: {e}")
 
 def save_outputs(buy_df, analysis_df, config):
-    google_handler.save_dataframe_file_id(buy_df, config["buy_file_id"])
-    google_handler.save_dataframe_file_id(analysis_df, config["analysis_file_id"])
+    logger = logging.getLogger(__name__)
+    try:
+        google_handler.save_dataframe_file_id(buy_df, config["buy_file_id"])
+    except Exception as e:
+        logger.error(f"❌ Failed to save buy recommendations: {e}")
+    try:
+        google_handler.save_dataframe_file_id(analysis_df, config["analysis_file_id"])
+    except Exception as e:
+        logger.error(f"❌ Failed to save analysis: {e}")
 
 def main(show_dataframes=False):
 
@@ -108,8 +136,8 @@ def main(show_dataframes=False):
     symbols_info_list = finnhub_client.get_symbols_info(config["symbols_interest_list"])
     analysis_df = pd.DataFrame(symbols_info_list)
 
-    # Analyze each symbol and collect analysis results
-    analysis_results = [analyze_symbol(data) for data in symbols_info_list]
+    # Analyze each symbol and collect analysis results (skip failures)
+    analysis_results = [r for r in (analyze_symbol(data) for data in symbols_info_list) if r is not None]
 
     # Enrich analysis_df with opinions
     analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])

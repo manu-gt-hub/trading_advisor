@@ -306,8 +306,13 @@ def add_urls_column(buy_df, symbol_col="symbol"):
     # Load SYMBOLS_MARKETS from JSON
     project_root = Path(__file__).resolve().parent.parent
     json_path = project_root / "resources" / "symbols_markets.json"
-    with open(json_path, "r", encoding="utf-8") as f:
-        SYMBOLS_MARKETS = json.load(f)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            SYMBOLS_MARKETS = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"❌ Could not load symbols_markets.json: {e}")
+        buy_df["tradingview_url"] = "NOT FOUND"
+        return buy_df
 
     def build_url(symbol):
         if not isinstance(symbol, str):
