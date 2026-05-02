@@ -42,7 +42,7 @@ def test_review_transactions():
 # Utility function to load historical data from CSV
 def load_hist_data():
     current_dir = os.path.dirname(__file__)
-    csv_path = os.path.join(current_dir, '..', 'resources', 'msft_hist_data.csv')
+    csv_path = os.path.join(current_dir, '..', 'resources', 'historicals', 'msft_hist_data.csv')
     return pd.read_csv(csv_path)
 
 @patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)

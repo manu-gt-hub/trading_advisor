@@ -61,5 +61,6 @@ jobs:
           GPT_MODEL_NAME: ${{ vars.GPT_MODEL_NAME }} 
           TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
           MIN_BUY_CONFIDENCE: ${{ vars.MIN_BUY_CONFIDENCE }}
+          NEWS_SENT_ANALYSIS: ${{ vars.NEWS_SENT_ANALYSIS }}
             
         run: python main.py
