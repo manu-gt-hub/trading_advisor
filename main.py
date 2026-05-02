@@ -134,6 +134,9 @@ def main(show_dataframes=False):
     now_madrid = general.get_current_time_madrid()
 
     symbols_info_list = finnhub_client.get_symbols_info(config["symbols_interest_list"])
+    # Normalize symbols (e.g., BHE.DE -> BHE) so they match across pipeline
+    for item in symbols_info_list:
+        item["symbol"] = item["symbol"].split(".")[0]
     analysis_df = pd.DataFrame(symbols_info_list)
 
     # Analyze each symbol and collect analysis results (skip failures)
@@ -170,7 +173,7 @@ def main(show_dataframes=False):
         buy_df = filter_correlated_buys(buy_df, max_correlation=0.75)
 
     # Update and save all outputs
-    update_and_save_transactions(config, symbols_info_list, buy_df, now_madrid)
+    update_and_save_transactions(config, analysis_df, buy_df, now_madrid)
     save_outputs(buy_df, analysis_df, config)
 
     config.get("logger").info("✅ successfully run main")
