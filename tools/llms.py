@@ -8,13 +8,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 system_prompt = (
-    "You are an expert short-term stock trading analyst. "
-    "You analyze technical indicators to identify high-probability setups for 1-4 week trades. "
-    "You are conservative: you only recommend BUY when multiple strong signals align (trend + momentum + confirmation). "
-    "You recommend SELL when bearish signals dominate. "
-    "You recommend HOLD when signals are mixed or inconclusive. "
-    "Never recommend BUY in a bearish trend unless there is a clear reversal pattern. "
-    "Never recommend SELL in a strong bullish trend unless overbought signals are extreme."
+    "You are a critical risk reviewer for short-term stock trades (1-4 weeks). "
+    "Your job is to act as a devil's advocate: challenge every BUY recommendation and look for hidden risks. "
+    "You receive technical indicators and a quantitative model's recommendation. "
+    "Your role is NOT to repeat the analysis — it is to find what could go WRONG. "
+    "Look for: divergences between indicators, overbought conditions masked by trend, "
+    "volume anomalies, exhaustion patterns, false breakouts, and any red flags. "
+    "Only confirm BUY if you cannot find strong reasons against it. "
+    "If you find significant risks, recommend HOLD regardless of what the model says. "
+    "Recommend SELL only if you see clear danger signs (breakdown, extreme overbought, distribution)."
 )
 
 def generate_prompt(metrics, current_price, technical_evaluation=None, confidence=None):
@@ -32,18 +34,20 @@ def generate_prompt(metrics, current_price, technical_evaluation=None, confidenc
         )
 
     return (
-        f"Analyze the following technical indicators for a stock currently priced at {current_price}:\n"
+        f"A quantitative model has analyzed a stock priced at {current_price} and produced these indicators:\n"
         f"{metrics}\n"
         f"{tech_context}\n"
-        f"KEY RULES:\n"
-        f"- Goal: identify short-term setups (1-4 weeks) capable of ~{revenue_percentage}% profit.\n"
-        f"- BUY only if trend (MA50>MA200, price>EMA20) AND momentum (RSI 55-70, MACD bullish) align.\n"
-        f"- SELL if bearish trend AND weak momentum AND no reversal signs.\n"
-        f"- HOLD if signals are mixed, conflicting, or insufficient for a strong conviction.\n"
-        f"- When in doubt, prefer HOLD over BUY. Avoiding bad trades matters more than catching every opportunity.\n\n"
-        f"Output format: CONFIDENCE% DECISION - brief explanation (max 30 words, include key indicators in parentheses).\n"
-        f"CONFIDENCE is your conviction level from 0 to 100 (e.g., 75% BUY - ...).\n"
-        f"Options for DECISION: BUY, HOLD, SELL."
+        f"YOUR TASK: Act as devil's advocate. The target is ~{revenue_percentage}% profit in 1-4 weeks.\n"
+        f"1. Look for risks the model might miss: divergences, overbought exhaustion, low volume breakouts, false signals.\n"
+        f"2. Check if indicators actually CONFIRM each other or if there are hidden contradictions.\n"
+        f"3. Consider: is the setup genuinely strong, or does it just look good on paper?\n\n"
+        f"DECISION RULES:\n"
+        f"- BUY: Only if you find NO significant risks after scrutiny. The setup must be genuinely solid.\n"
+        f"- HOLD: If you find any meaningful risk or contradiction, even if the overall picture looks positive.\n"
+        f"- SELL: Only if you see clear danger (breakdown, extreme overbought + distribution, bearish divergence).\n"
+        f"- When in doubt, ALWAYS choose HOLD. Missing a good trade is better than entering a bad one.\n\n"
+        f"Output format: CONFIDENCE% DECISION - brief risk assessment (max 30 words, cite specific indicators).\n"
+        f"CONFIDENCE is your conviction from 0 to 100. Options: BUY, HOLD, SELL."
     )
 
 def check_llm_env():
