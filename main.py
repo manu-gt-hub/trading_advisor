@@ -4,7 +4,7 @@ import argparse
 import os
 import pandas as pd
 import logging
-from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms
+from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms, news_sentiment
 from tools.general import extract_llm_confidence
 from tools.risk_management import compute_stop_loss_take_profit, filter_correlated_buys
 import numpy as np
@@ -31,6 +31,7 @@ def load_config():
         "analysis_file_id": os.environ.get("ANALYSIS_FILE_ID"),
         "force_opinion": os.environ.get("FORCE_OPINION"),
         "min_buy_confidence": float(os.environ.get("MIN_BUY_CONFIDENCE", 0.5)),
+        "news_sent_analysis": os.environ.get("NEWS_SENT_ANALYSIS", "false").lower() == "true",
     }
 
 def analyze_symbol(symbol_data):
@@ -161,6 +162,32 @@ def main(show_dataframes=False):
         config['logger'].info(
             f"Filtered out BUY for {row['symbol']}: confidence {row['technical_confidence']:.2f} < {min_conf}"
         )
+
+    # News sentiment filter: block BUYs with upcoming earnings or strongly negative news
+    if not buy_df.empty:
+        blocked_symbols = []
+        for _, row in buy_df.iterrows():
+            try:
+                news_result = news_sentiment.evaluate_news_filter(
+                    row['symbol'],
+                    news_sentiment_enabled=config["news_sent_analysis"]
+                )
+                analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'news_sentiment'] = (
+                    news_result['news_sentiment']['summary']
+                )
+                analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'earnings_soon'] = (
+                    news_result['earnings_soon']
+                )
+                if news_result['block_buy']:
+                    blocked_symbols.append(row['symbol'])
+                    config['logger'].info(
+                        f"🚫 News filter blocked BUY for {row['symbol']}: {news_result['reason']}"
+                    )
+            except Exception as e:
+                config['logger'].error(f"❌ News filter failed for {row['symbol']}: {e}. Keeping BUY.")
+
+        if blocked_symbols:
+            buy_df = buy_df[~buy_df['symbol'].isin(blocked_symbols)].copy()
     buy_df['buy_date'] = now_madrid
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
     buy_date_col = buy_df.pop('buy_date')
