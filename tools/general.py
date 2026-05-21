@@ -145,9 +145,9 @@ def apply_technical_filter(llm_decision, custom_opinion, llm_confidence=0.5):
     llm_score = score_map.get(llm_decision, 0.0)
     custom_score = score_map.get(custom_decision, 0.0)
 
-    # Weighted combination using both confidence levels
+    # Weighted combination: technical model gets 1.2x weight (data-driven vs opinion-based)
     llm_weight = max(llm_confidence, 0.1)  # minimum 0.1 so LLM always counts
-    tech_weight = max(abs(custom_conf), 0.1)  # minimum 0.1 so technical always counts
+    tech_weight = max(abs(custom_conf), 0.1) * 1.2  # 1.2x weight: technical has actual data
 
     combined = (llm_score * llm_weight) + (custom_score * tech_weight)
     total_weight = llm_weight + tech_weight
@@ -155,10 +155,10 @@ def apply_technical_filter(llm_decision, custom_opinion, llm_confidence=0.5):
     # Normalize to [-1, 1]
     normalized = combined / total_weight if total_weight > 0 else 0.0
 
-    # Decision thresholds — require strong consensus
-    if normalized >= 0.6:
+    # Decision thresholds — balanced consensus
+    if normalized >= 0.5:
         result = 'BUY'
-    elif normalized <= -0.6:
+    elif normalized <= -0.5:
         result = 'SELL'
     else:
         result = 'HOLD'

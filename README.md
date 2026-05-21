@@ -5,10 +5,12 @@ Automated stock trading signal generator that combines **LLM analysis (GPT)** wi
 ## 🚀 Features
 
 ### Decision Engine
-- **Consensus system** — Decisions require agreement between GPT and technical analysis, weighted by their respective confidence levels
+- **Weighted consensus system** — Technical model (1.2x weight) + GPT (1.0x weight), combined score must reach ≥0.5 for BUY
+- **LLM as devil's advocate** — GPT reviews setups critically, confirms BUY only when no significant risks are found
 - **Three modes** via `FORCE_OPINION`: `DEFAULT` (consensus), `LLM1` (GPT only), `CUSTOM` (technical only)
 - **LLM confidence** — GPT returns a 0-100% conviction score that weights its vote in the consensus
-- **MIN_BUY_CONFIDENCE** — Filters out weak BUY signals below a configurable threshold
+- **MIN_BUY_CONFIDENCE** — Pre-filter: minimum technical confidence to enter consensus (0.0-1.0, default 0.5)
+- **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT)
 
 ### Technical Analysis (`custom_financial_calc.py`)
 - **Trend**: SMA 50/200, EMA 20, MA50 slope
@@ -31,14 +33,18 @@ Automated stock trading signal generator that combines **LLM analysis (GPT)** wi
 ### Backtesting (`backtesting.py`)
 - Simulates signals over historical data **without look-ahead bias**
 - Measures win rate, average return, max drawdown per trade
-- MSFT 5-year backtest results (10% target, 30-day hold):
-  - **Win rate**: 30% | **Avg return**: +2.06% | **Median return**: +2.76%
-  - Conservative: ~4 BUY signals/year
+- Multi-stock backtest results (10% target, 30-day hold, 5 years):
+  - **NVDA**: 58.8% win rate, +10.43% avg return
+  - **META**: 47.9% win rate, +7.04% avg return
+  - **MSFT**: 24.4% win rate, +2.21% avg return
+  - System works best on volatile tech stocks
+- Run all backtests: `python run_backtest_all.py`
+- Normalize CSV formats: `python normalize_csvs.py`
 
 ### Infrastructure
 - **Daily execution** via GitHub Actions (scheduled cron)
 - **Google Drive** integration for persisting analysis and recommendations
-- **59 tests**, fully mocked (no external API calls), ~10s execution
+- **80 tests**, fully mocked (no external API calls), ~11s execution
 
 ## 🛠️ Getting Started
 
@@ -75,6 +81,7 @@ pip install -r requirements.txt
 | `MIN_BUY_CONFIDENCE` | Minimum technical confidence to accept a BUY (0.0-1.0, default 0.5) |
 | `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
 | `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
+| `NEWS_SENT_ANALYSIS` | Enable news sentiment filter (`true`/`false`, default `false`) |
 
 ### Usage
 
@@ -108,7 +115,30 @@ python main.py --test
 
 All tests are mocked — no external API calls. Google Drive tests (`test_google_handler.py`) are integration tests excluded by default.
 
-## 📊 Architecture
+## � Signal Pipeline
+
+```mermaid
+flowchart TD
+    A[Fetch quotes - Finnhub] -->|current prices| B[Technical analysis]
+    B -->|20+ indicators<br>BUY/HOLD/SELL + confidence| C{MIN_BUY_CONFIDENCE<br>filter}
+    C -->|conf < threshold| X1[Discarded]
+    C -->|conf >= threshold| D[LLM devil's advocate<br>review]
+    D -->|GPT challenges BUY<br>looks for hidden risks| E{Weighted consensus<br>1.2x tech + 1.0x LLM}
+    E -->|score < 0.5| X2[HOLD]
+    E -->|score >= 0.5| F{News sentiment<br>filter}
+    F -->|earnings soon or<br>negative news| X3[BUY blocked]
+    F -->|no risks| G{Correlation<br>filter}
+    G -->|Pearson > 0.75| X4[Duplicate removed]
+    G -->|uncorrelated| H[Google Drive<br>BUY recommendation]
+
+    style X1 fill:#ff6b6b,color:#fff
+    style X2 fill:#ffa94d,color:#fff
+    style X3 fill:#ff6b6b,color:#fff
+    style X4 fill:#ffa94d,color:#fff
+    style H fill:#51cf66,color:#fff
+```
+
+## �� Architecture
 
 ```
 main.py                          # Entry point: orchestrates analysis pipeline
@@ -122,7 +152,8 @@ tools/
   finnhub_client.py              # Finnhub market data
   google_handler.py              # Google Drive read/write
   email_handler.py               # Email notifications
-test/                            # 59 tests, fully mocked
+  news_sentiment.py              # Finnhub news + earnings + GPT sentiment filter
+test/                            # 80 tests, fully mocked
 resources/                       # CSV data, symbol mappings
 .github/workflows/               # CI (tests) + daily execution
 ```
