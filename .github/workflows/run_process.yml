@@ -3,7 +3,7 @@ name: run process
 on:
   schedule:
     # execution times in Madrid
-    - cron: '0 17 * * *' # 18:00 in winter, 19:00 in summer
+    - cron: '0 17 * * 1-5' # 18:00 in winter, 19:00 in summer
 
   workflow_dispatch:
 

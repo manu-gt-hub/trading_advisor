@@ -1,3 +1,8 @@
+"""
+Integration tests for Google Drive handler.
+These tests require real credentials and are excluded from the default test suite.
+Run manually with: python -m pytest test/test_google_handler.py -v
+"""
 import os
 import json
 import pandas as pd
@@ -7,7 +12,9 @@ import sys
 from datetime import datetime, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
-from google_handler import get_drive_service, load_data, update_transactions
+
+# Guard: skip entire module if google packages are not installed
+google_handler = pytest.importorskip("google_handler", reason="google.oauth2 not installed")
 
 # Get absolute path to the env path
 current_dir = os.path.dirname(__file__)
@@ -30,7 +37,7 @@ def test_get_drive_service_real():
     assert os.environ["GDRIVE_CREDENTIALS_JSON"], "GDRIVE_CREDENTIALS_JSON is not set"
     assert os.environ["GDRIVE_FILE_ID"], "GDRIVE_FILE_ID is not set"
 
-    service = get_drive_service()
+    service = google_handler.get_drive_service()
     files_list = service.files().list(pageSize=1).execute()
 
     assert "files" in files_list
@@ -49,10 +56,10 @@ def test_load_data_real():
     assert os.environ["GDRIVE_FILE_ID"], "GDRIVE_FILE_ID is not set"
     assert os.environ["BUY_RECOMMENDATIONS_ID"], "BUY_RECOMMENDATIONS_ID is not set"
 
-    transactions_df = load_data(transactions_id)
+    transactions_df = google_handler.load_data(transactions_id)
     assert isinstance(transactions_df, pd.DataFrame)
 
-    df_buy = load_data(buy_file_id)
+    df_buy = google_handler.load_data(buy_file_id)
     assert isinstance(df_buy, pd.DataFrame)
 
 
@@ -89,8 +96,7 @@ def test_update_transactions():
     revenue_percentage = 10  
 
     # Call the function
-    from datetime import date
-    updated_df = update_transactions(df_analysis, df_transactions, revenue_percentage)
+    updated_df = google_handler.update_transactions(df_analysis, df_transactions, revenue_percentage)
 
     # Validate AAPL was updated (165 >= 150 * 1.1 = 165)
     aapl_row = updated_df[updated_df['symbol'] == 'AAPL'].iloc[0]

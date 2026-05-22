@@ -10,7 +10,10 @@ Automated stock trading signal generator that combines **LLM analysis (GPT)** wi
 - **Three modes** via `FORCE_OPINION`: `DEFAULT` (consensus), `LLM1` (GPT only), `CUSTOM` (technical only)
 - **LLM confidence** — GPT returns a 0-100% conviction score that weights its vote in the consensus
 - **MIN_BUY_CONFIDENCE** — Pre-filter: minimum technical confidence to enter consensus (0.0-1.0, default 0.5)
+- **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.5 (ATR-based stop-loss vs take-profit)
 - **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT)
+- **Market day guard** — Skips execution on weekends and US holidays to avoid stale prices
+- **LLM cost optimization** — Only calls GPT for BUY candidates; SELL/HOLD signals skip LLM
 
 ### Technical Analysis (`custom_financial_calc.py`)
 - **Trend**: SMA 50/200, EMA 20, MA50 slope
@@ -44,7 +47,7 @@ Automated stock trading signal generator that combines **LLM analysis (GPT)** wi
 ### Infrastructure
 - **Daily execution** via GitHub Actions (scheduled cron)
 - **Google Drive** integration for persisting analysis and recommendations
-- **80 tests**, fully mocked (no external API calls), ~11s execution
+- **92 tests**, fully mocked (no external API calls), ~12s execution
 
 ## 🛠️ Getting Started
 
@@ -119,22 +122,30 @@ All tests are mocked — no external API calls. Google Drive tests (`test_google
 
 ```mermaid
 flowchart TD
-    A[Fetch quotes - Finnhub] -->|current prices| B[Technical analysis]
-    B -->|20+ indicators<br>BUY/HOLD/SELL + confidence| C{MIN_BUY_CONFIDENCE<br>filter}
+    Z{Market day?} -->|weekend/holiday| X0[Skip execution]
+    Z -->|weekday| A[Fetch quotes - Finnhub]
+    A -->|current prices| B[Technical analysis]
+    B -->|SELL/HOLD| S[LLM skipped<br>save API costs]
+    B -->|BUY candidate| C{MIN_BUY_CONFIDENCE<br>filter}
     C -->|conf < threshold| X1[Discarded]
     C -->|conf >= threshold| D[LLM devil's advocate<br>review]
-    D -->|GPT challenges BUY<br>looks for hidden risks| E{Weighted consensus<br>1.2x tech + 1.0x LLM}
+    D -->|GPT challenges BUY| E{Weighted consensus<br>1.2x tech + 1.0x LLM}
     E -->|score < 0.5| X2[HOLD]
-    E -->|score >= 0.5| F{News sentiment<br>filter}
+    E -->|score >= 0.5| RR{Risk/Reward<br>ratio filter}
+    RR -->|R:R < 1.5| X5[BUY blocked]
+    RR -->|R:R >= 1.5| F{News sentiment<br>filter}
     F -->|earnings soon or<br>negative news| X3[BUY blocked]
     F -->|no risks| G{Correlation<br>filter}
     G -->|Pearson > 0.75| X4[Duplicate removed]
     G -->|uncorrelated| H[Google Drive<br>BUY recommendation]
 
+    style X0 fill:#868e96,color:#fff
     style X1 fill:#ff6b6b,color:#fff
     style X2 fill:#ffa94d,color:#fff
     style X3 fill:#ff6b6b,color:#fff
     style X4 fill:#ffa94d,color:#fff
+    style X5 fill:#ff6b6b,color:#fff
+    style S fill:#868e96,color:#fff
     style H fill:#51cf66,color:#fff
 ```
 
@@ -153,7 +164,7 @@ tools/
   google_handler.py              # Google Drive read/write
   email_handler.py               # Email notifications
   news_sentiment.py              # Finnhub news + earnings + GPT sentiment filter
-test/                            # 80 tests, fully mocked
+test/                            # 92 tests, fully mocked
 resources/                       # CSV data, symbol mappings
 .github/workflows/               # CI (tests) + daily execution
 ```
