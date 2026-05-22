@@ -12,6 +12,9 @@ Automated stock trading signal generator that combines **LLM analysis (GPT)** wi
 - **MIN_BUY_CONFIDENCE** — Pre-filter: minimum technical confidence to enter consensus (0.0-1.0, default 0.5)
 - **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.5 (ATR-based stop-loss vs take-profit)
 - **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT)
+- **Position tracking** — Skips BUY if symbol already has an open (unsold) position
+- **Signal diversity scoring** — Penalizes confidence when BUY signal comes from < 3 independent categories (trend/momentum/volume/structure/context)
+- **Adaptive take-profit** — Uses the more conservative of fixed REVENUE_PERCENTAGE and 3×ATR
 - **Market day guard** — Skips execution on weekends and US holidays to avoid stale prices
 - **LLM cost optimization** — Only calls GPT for BUY candidates; SELL/HOLD signals skip LLM
 
@@ -47,7 +50,7 @@ Automated stock trading signal generator that combines **LLM analysis (GPT)** wi
 ### Infrastructure
 - **Daily execution** via GitHub Actions (scheduled cron)
 - **Google Drive** integration for persisting analysis and recommendations
-- **92 tests**, fully mocked (no external API calls), ~12s execution
+- **93 tests**, fully mocked (no external API calls), ~12s execution
 
 ## 🛠️ Getting Started
 
@@ -128,7 +131,9 @@ flowchart TD
     B -->|SELL/HOLD| S[LLM skipped<br>save API costs]
     B -->|BUY candidate| C{MIN_BUY_CONFIDENCE<br>filter}
     C -->|conf < threshold| X1[Discarded]
-    C -->|conf >= threshold| D[LLM devil's advocate<br>review]
+    C -->|conf >= threshold| P{Position<br>tracking}
+    P -->|already holding| X6[Skip - open position]
+    P -->|not holding| D[LLM devil's advocate<br>review]
     D -->|GPT challenges BUY| E{Weighted consensus<br>1.2x tech + 1.0x LLM}
     E -->|score < 0.5| X2[HOLD]
     E -->|score >= 0.5| RR{Risk/Reward<br>ratio filter}
@@ -145,6 +150,7 @@ flowchart TD
     style X3 fill:#ff6b6b,color:#fff
     style X4 fill:#ffa94d,color:#fff
     style X5 fill:#ff6b6b,color:#fff
+    style X6 fill:#ffa94d,color:#fff
     style S fill:#868e96,color:#fff
     style H fill:#51cf66,color:#fff
 ```
@@ -164,7 +170,7 @@ tools/
   google_handler.py              # Google Drive read/write
   email_handler.py               # Email notifications
   news_sentiment.py              # Finnhub news + earnings + GPT sentiment filter
-test/                            # 92 tests, fully mocked
+test/                            # 93 tests, fully mocked
 resources/                       # CSV data, symbol mappings
 .github/workflows/               # CI (tests) + daily execution
 ```

@@ -17,10 +17,16 @@ class TestStopLossTakeProfit:
         assert result["risk_reward_ratio"] == 1.5  # 15/10
 
     def test_with_revenue_percentage(self):
+        # Adaptive target: min(fixed=120, ATR=115) = 115
         result = compute_stop_loss_take_profit(100.0, 5.0, revenue_percentage=20)
         assert result["stop_loss"] == 90.0
-        assert result["take_profit"] == 120.0  # 100 * 1.20
-        assert result["risk_reward_ratio"] == 2.0  # 20/10
+        assert result["take_profit"] == 115.0  # min(100*1.20, 100+3*5)
+        assert result["risk_reward_ratio"] == 1.5  # 15/10
+
+    def test_revenue_pct_lower_than_atr(self):
+        # When fixed target is lower than ATR target, fixed wins
+        result = compute_stop_loss_take_profit(100.0, 10.0, revenue_percentage=5)
+        assert result["take_profit"] == 105.0  # min(105, 130) = 105
 
     def test_invalid_atr(self):
         result = compute_stop_loss_take_profit(100.0, 0)

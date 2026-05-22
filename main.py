@@ -187,6 +187,23 @@ def main(show_dataframes=False):
             f"Filtered out BUY for {row['symbol']}: confidence {row['technical_confidence']:.2f} < {min_conf}"
         )
 
+    # Position tracking: skip BUY if already holding an open position
+    if not buy_df.empty:
+        try:
+            transactions_df = google_handler.load_data(config["transactions_file_id"])
+            if transactions_df is not None and not transactions_df.empty:
+                open_positions = transactions_df[
+                    transactions_df['sell_value'].isna()
+                ]['symbol'].tolist()
+                already_held = buy_df[buy_df['symbol'].isin(open_positions)]
+                for _, row in already_held.iterrows():
+                    config['logger'].info(
+                        f"🚫 Position filter: skipping BUY for {row['symbol']} — already holding open position"
+                    )
+                buy_df = buy_df[~buy_df['symbol'].isin(open_positions)].copy()
+        except Exception as e:
+            config['logger'].warning(f"⚠️ Position tracking check failed: {e}. Continuing without filter.")
+
     # Risk/Reward filter: block BUYs with bad risk/reward ratio
     if not buy_df.empty and 'risk_reward_ratio' in buy_df.columns:
         min_rr = 1.5

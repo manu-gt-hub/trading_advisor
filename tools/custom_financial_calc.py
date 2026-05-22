@@ -698,9 +698,86 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
                 active_signals.append(f"🌍 Market context: S&P500 NEUTRAL (score={market_score:.1f})")
 
         # -------------------------
+        # Signal diversity: count how many categories agree
+        # Categories: trend, momentum, volume, structure (fib/candles), market context
+        # -------------------------
+        category_scores = {
+            "trend": 0.0,      # MA50/200, EMA20, MA50 slope, ADX direction, weekly trend
+            "momentum": 0.0,   # RSI, StochRSI, MACD, ROC, MACD hist
+            "volume": 0.0,     # OBV, breakout volume, breakout
+            "structure": 0.0,  # Bollinger, Fibonacci, candles
+            "context": 0.0,    # Market trend, weekly RSI, historical prob, volatility
+        }
+        # Re-tally scores by category from the signals already computed
+        # Trend signals
+        if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
+            category_scores["trend"] += 1 if latest["ma50"] > latest["ma200"] else -1
+        if pd.notna(latest["ma50"]) and pd.notna(latest["ema_20"]):
+            if current_price > latest["ema_20"] and current_price > latest["ma50"]:
+                category_scores["trend"] += 1
+            elif current_price < latest["ema_20"] and current_price < latest["ma50"]:
+                category_scores["trend"] -= 1
+        if pd.notna(latest["ma50_slope"]):
+            category_scores["trend"] += 1 if latest["ma50_slope"] > 0 else -1
+        if pd.notna(latest["adx"]) and strong_trend and pd.notna(latest["plus_di"]) and pd.notna(latest["minus_di"]):
+            category_scores["trend"] += 1 if latest["plus_di"] > latest["minus_di"] else -1
+        if weekly_conf and weekly_conf["weekly_trend_bullish"] and weekly_conf["weekly_price_above_ma10"]:
+            category_scores["trend"] += 1
+        elif weekly_conf and not weekly_conf["weekly_trend_bullish"] and not weekly_conf["weekly_price_above_ma10"]:
+            category_scores["trend"] -= 1
+
+        # Momentum signals
+        if pd.notna(latest["rsi"]):
+            if latest["rsi"] < 30 or (55 <= latest["rsi"] <= 70):
+                category_scores["momentum"] += 1
+            elif latest["rsi"] > 70 or (30 <= latest["rsi"] < 45):
+                category_scores["momentum"] -= 1
+        if pd.notna(latest["stoch_rsi_k"]) and pd.notna(latest["stoch_rsi_d"]):
+            if latest["stoch_rsi_k"] < 20:
+                category_scores["momentum"] += 1
+            elif latest["stoch_rsi_k"] > 80:
+                category_scores["momentum"] -= 1
+        if pd.notna(latest["macd"]) and pd.notna(latest["signal_line"]):
+            category_scores["momentum"] += 1 if latest["macd"] > latest["signal_line"] else -1
+        if pd.notna(latest["roc_10"]):
+            category_scores["momentum"] += 1 if latest["roc_10"] > 0 else -1
+
+        # Volume signals
+        if has_volume and pd.notna(latest.get("obv")) and pd.notna(latest.get("obv_sma_20")):
+            category_scores["volume"] += 1 if latest["obv"] > latest["obv_sma_20"] else -1
+        if latest["breakout_20"]:
+            category_scores["volume"] += 1
+
+        # Structure signals (Bollinger, Fib, candles)
+        if pd.notna(latest["bb_lower"]) and current_price <= latest["bb_lower"]:
+            category_scores["structure"] += 1
+        elif pd.notna(latest["bb_upper"]) and current_price >= latest["bb_upper"]:
+            category_scores["structure"] -= 1
+        for p in candle_patterns:
+            if p in {"HAMMER", "BULLISH_ENGULFING"}:
+                category_scores["structure"] += 1
+            elif p in {"SHOOTING_STAR", "BEARISH_ENGULFING"}:
+                category_scores["structure"] -= 1
+
+        # Context
+        if market_trend == "BULLISH":
+            category_scores["context"] += 1
+        elif market_trend == "BEARISH":
+            category_scores["context"] -= 1
+
+        # Count how many categories agree with the net direction
+        net_score = buy_score - sell_score
+        net_direction = 1 if net_score > 0 else (-1 if net_score < 0 else 0)
+        categories_agreeing = sum(
+            1 for v in category_scores.values()
+            if (v > 0 and net_direction > 0) or (v < 0 and net_direction < 0)
+        )
+        categories_with_signal = sum(1 for v in category_scores.values() if v != 0)
+        diversity_ratio = categories_agreeing / max(categories_with_signal, 1)
+
+        # -------------------------
         # Final decision with threshold
         # -------------------------
-        net_score = buy_score - sell_score
         total_score = buy_score + sell_score
 
         if total_score == 0:
@@ -712,8 +789,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         else:
             decision = "HOLD"
 
-        # Confidence score normalized to [-1, 1]
-        confidence = net_score / max(total_score, 1)
+        # Confidence score normalized to [-1, 1], penalized by low diversity
+        raw_confidence = net_score / max(total_score, 1)
+        # If less than 3 categories agree, reduce confidence (signal is concentrated)
+        diversity_penalty = 1.0 if categories_agreeing >= 3 else (0.85 if categories_agreeing == 2 else 0.7)
+        confidence = raw_confidence * diversity_penalty
 
         # -------------------------
         # Convert NumPy types to native float and round
@@ -723,7 +803,10 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             for k, v in signals_dict.items()
         }
 
-        logger.info(f"✅ Successfully evaluated buy interest for {symbol}: decision={decision}, confidence={confidence:.2f}, buy={buy_score:.1f}, sell={sell_score:.1f}")
+        signals_dict["Signal_Diversity"] = f"{categories_agreeing}/{categories_with_signal} categories"
+        signals_dict["Diversity_Penalty"] = round(diversity_penalty, 2)
+
+        logger.info(f"✅ Successfully evaluated buy interest for {symbol}: decision={decision}, confidence={confidence:.2f}, diversity={categories_agreeing}/{categories_with_signal}, buy={buy_score:.1f}, sell={sell_score:.1f}")
 
         return {
             "symbol": symbol,
