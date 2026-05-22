@@ -67,12 +67,15 @@ def enrich_analysis_df(df, analysis, force_opinion):
         try:
             metrics = item["metrics"]
 
-            if "failed" not in metrics["evaluation"]:
+            # Only call LLM for BUY candidates — skip SELL/HOLD/FAILED to save API costs
+            if "failed" not in metrics["evaluation"] and metrics["evaluation"] == "BUY":
                 llm_opinion = llms.get_gpt_signals_analysis(
                     metrics["signals"], symbol, item["current_price"],
                     technical_evaluation=metrics["evaluation"],
                     confidence=metrics["confidence"]
                 )
+            elif "failed" not in metrics["evaluation"]:
+                llm_opinion = f"50% {metrics['evaluation']} - technical signal, LLM skipped"
             else:
                 llm_opinion = "error: metrics not provided"
 
@@ -129,10 +132,31 @@ def save_outputs(buy_df, analysis_df, config):
     except Exception as e:
         logger.error(f"❌ Failed to save analysis: {e}")
 
+def _is_market_day():
+    """Check if today is a US stock market trading day (Mon-Fri, not major holidays)."""
+    from datetime import date as date_cls
+    today = date_cls.today()
+    # Weekend check
+    if today.weekday() >= 5:  # 5=Saturday, 6=Sunday
+        return False
+    # US market holidays (fixed dates — doesn't cover floating holidays like Thanksgiving)
+    us_holidays = [
+        (1, 1),   # New Year's Day
+        (7, 4),   # Independence Day
+        (12, 25), # Christmas Day
+    ]
+    if (today.month, today.day) in us_holidays:
+        return False
+    return True
+
 def main(show_dataframes=False):
 
     config = load_config()
     now_madrid = general.get_current_time_madrid()
+
+    if not _is_market_day():
+        config["logger"].info("📅 Market closed today (weekend or holiday). Skipping execution.")
+        return
 
     symbols_info_list = finnhub_client.get_symbols_info(config["symbols_interest_list"])
     # Normalize symbols (e.g., BHE.DE -> BHE) so they match across pipeline
@@ -162,6 +186,19 @@ def main(show_dataframes=False):
         config['logger'].info(
             f"Filtered out BUY for {row['symbol']}: confidence {row['technical_confidence']:.2f} < {min_conf}"
         )
+
+    # Risk/Reward filter: block BUYs with bad risk/reward ratio
+    if not buy_df.empty and 'risk_reward_ratio' in buy_df.columns:
+        min_rr = 1.5
+        bad_rr = buy_df[buy_df['risk_reward_ratio'].apply(
+            lambda x: pd.notna(x) and x < min_rr
+        )]
+        for _, row in bad_rr.iterrows():
+            config['logger'].info(
+                f"🚫 R:R filter blocked BUY for {row['symbol']}: "
+                f"ratio {row['risk_reward_ratio']:.2f} < {min_rr}"
+            )
+        buy_df = buy_df[~buy_df.index.isin(bad_rr.index)].copy()
 
     # News sentiment filter: block BUYs with upcoming earnings or strongly negative news
     if not buy_df.empty:
