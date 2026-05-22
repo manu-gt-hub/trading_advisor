@@ -25,11 +25,13 @@ def compute_stop_loss_take_profit(current_price, atr_14, revenue_percentage=None
     stop_loss = round(current_price - 2.0 * atr_14, 2)
     stop_loss = max(stop_loss, 0.01)  # floor at 0.01
 
-    # Take-profit: use revenue_percentage if available, else 3x ATR
+    # Take-profit: use the more conservative of fixed % and 3x ATR
+    atr_target = round(current_price + 3.0 * atr_14, 2)
     if revenue_percentage:
-        take_profit = round(current_price * (1 + float(revenue_percentage) / 100), 2)
+        fixed_target = round(current_price * (1 + float(revenue_percentage) / 100), 2)
+        take_profit = min(fixed_target, atr_target)  # use more conservative target
     else:
-        take_profit = round(current_price + 3.0 * atr_14, 2)
+        take_profit = atr_target
 
     risk = current_price - stop_loss
     reward = take_profit - current_price

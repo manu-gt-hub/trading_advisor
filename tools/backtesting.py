@@ -88,6 +88,11 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             "days_to_target": days_to_target,
         })
 
+    # Compute buy-and-hold benchmark over the same period
+    bh_start_price = float(df.iloc[min_history]["close"])
+    bh_end_price = float(df.iloc[-1]["close"])
+    bh_return_pct = ((bh_end_price - bh_start_price) / bh_start_price) * 100
+
     # Compute summary statistics
     if not trades:
         return {
@@ -95,6 +100,7 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             "total_signals": total_signals,
             "total_buy_signals": 0,
             "trades": [],
+            "benchmark_buy_hold_pct": round(bh_return_pct, 2),
             "summary": "No BUY signals generated during backtest period.",
         }
 
@@ -102,6 +108,12 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
     wins = trades_df["hit_target"].sum()
     total = len(trades_df)
     win_rate = wins / total if total > 0 else 0.0
+
+    # Cumulative return from system trades (compounding actual returns)
+    system_cumulative = 1.0
+    for r in trades_df["actual_return_pct"]:
+        system_cumulative *= (1 + r / 100)
+    system_return_pct = (system_cumulative - 1) * 100
 
     return {
         "symbol": symbol,
@@ -118,6 +130,9 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         "worst_trade_pct": round(trades_df["actual_return_pct"].min(), 2),
         "best_trade_pct": round(trades_df["actual_return_pct"].max(), 2),
         "avg_days_to_target": round(trades_df["days_to_target"].dropna().mean(), 1) if wins > 0 else None,
+        "system_cumulative_return_pct": round(system_return_pct, 2),
+        "benchmark_buy_hold_pct": round(bh_return_pct, 2),
+        "system_vs_benchmark": round(system_return_pct - bh_return_pct, 2),
         "trades": trades,
     }
 
@@ -148,5 +163,9 @@ def format_backtest_report(results):
     ]
     if results["avg_days_to_target"]:
         lines.append(f"  Avg days to target:{results['avg_days_to_target']:.0f} days")
+    lines.append(f"───────────────────────────────────────────")
+    lines.append(f"  System cumulative: {results['system_cumulative_return_pct']:+.2f}%")
+    lines.append(f"  Buy & Hold:        {results['benchmark_buy_hold_pct']:+.2f}%")
+    lines.append(f"  System vs B&H:     {results['system_vs_benchmark']:+.2f}%")
     lines.append(f"═══════════════════════════════════════════")
     return "\n".join(lines)

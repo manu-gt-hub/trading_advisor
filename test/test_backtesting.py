@@ -149,9 +149,14 @@ def test_format_backtest_report_with_trades():
         "worst_trade_pct": -3.2,
         "best_trade_pct": 18.5,
         "avg_days_to_target": 15.0,
+        "system_cumulative_return_pct": 42.5,
+        "benchmark_buy_hold_pct": 60.0,
+        "system_vs_benchmark": -17.5,
         "trades": [],
     }
     report = format_backtest_report(results)
     assert "WIN RATE" in report
     assert "60.0%" in report
     assert "TEST" in report
+    assert "Buy & Hold" in report
+    assert "System vs B&H" in report
