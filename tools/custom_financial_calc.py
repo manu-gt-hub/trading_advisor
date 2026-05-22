@@ -780,10 +780,18 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         # -------------------------
         total_score = buy_score + sell_score
 
+        # MA200 gate: price must be above MA200 for BUY (trend confirmation)
+        below_ma200 = False
+        if pd.notna(latest["ma200"]) and current_price < latest["ma200"]:
+            below_ma200 = True
+
         if total_score == 0:
             decision = "HOLD"
-        elif net_score >= 2.5:
+        elif net_score >= 2.5 and not below_ma200:
             decision = "BUY"
+        elif net_score >= 2.5 and below_ma200:
+            decision = "HOLD"
+            active_signals.append(f"⛔ BUY blocked: price ({current_price:.2f}) below MA200 ({latest['ma200']:.2f})")
         elif net_score <= -2.5:
             decision = "SELL"
         else:

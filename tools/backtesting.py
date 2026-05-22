@@ -31,7 +31,15 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
     df.columns = df.columns.str.lower()
     df["date"] = pd.to_datetime(df["date"], utc=True)
     df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    df["high"] = pd.to_numeric(df.get("high", df["close"]), errors="coerce")
+    df["low"] = pd.to_numeric(df.get("low", df["close"]), errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
+
+    # Precompute ATR for trailing stop
+    tr1 = df["high"] - df["low"]
+    tr2 = (df["high"] - df["close"].shift(1)).abs()
+    tr3 = (df["low"] - df["close"].shift(1)).abs()
+    df["atr_14"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean()
 
     trades = []
     total_signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "EVALUATION_FAILED": 0}
@@ -60,23 +68,47 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         if future.empty:
             continue
 
-        # Check if target was hit during holding period
-        max_price = float(future["close"].max())
-        max_return_pct = ((max_price - entry_price) / entry_price) * 100
-        hit_target = max_return_pct >= target_profit_pct
+        # Compute ATR at entry for trailing stop
+        atr_at_entry = float(df.iloc[i].get("atr_14", 0)) if pd.notna(df.iloc[i].get("atr_14")) else 0
+        trailing_stop_distance = 2.5 * atr_at_entry if atr_at_entry > 0 else None
+        # Only activate trailing stop after price is 2% above entry (avoid cutting early)
+        trailing_activation_pct = 2.0
 
-        # Calculate actual return at end of holding period
-        exit_price = float(future.iloc[-1]["close"])
-        actual_return_pct = ((exit_price - entry_price) / entry_price) * 100
-
-        # Find the day the target was hit (if it was)
+        # Simulate trade with trailing stop + target exit
+        max_price_seen = entry_price
+        exit_price = float(future.iloc[-1]["close"])  # default: exit at end
+        exit_reason = "max_hold"
+        days_held = len(future)
+        hit_target = False
         days_to_target = None
-        if hit_target:
-            for j, (_, row) in enumerate(future.iterrows(), 1):
-                pct = ((float(row["close"]) - entry_price) / entry_price) * 100
-                if pct >= target_profit_pct:
-                    days_to_target = j
-                    break
+
+        for j, (_, row) in enumerate(future.iterrows(), 1):
+            close = float(row["close"])
+            if close > max_price_seen:
+                max_price_seen = close
+
+            # Check target hit
+            pct_from_entry = ((close - entry_price) / entry_price) * 100
+            if pct_from_entry >= target_profit_pct:
+                exit_price = close
+                exit_reason = "target"
+                days_held = j
+                hit_target = True
+                days_to_target = j
+                break
+
+            # Check trailing stop (only active once trade is in profit)
+            max_gain_pct = ((max_price_seen - entry_price) / entry_price) * 100
+            if (trailing_stop_distance
+                    and max_gain_pct >= trailing_activation_pct
+                    and max_price_seen - close >= trailing_stop_distance):
+                exit_price = close
+                exit_reason = "trailing_stop"
+                days_held = j
+                break
+
+        max_return_pct = ((max_price_seen - entry_price) / entry_price) * 100
+        actual_return_pct = ((exit_price - entry_price) / entry_price) * 100
 
         trades.append({
             "entry_date": entry_date,
@@ -86,6 +118,8 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             "actual_return_pct": round(actual_return_pct, 2),
             "hit_target": hit_target,
             "days_to_target": days_to_target,
+            "exit_reason": exit_reason,
+            "days_held": days_held,
         })
 
     # Compute buy-and-hold benchmark over the same period

@@ -81,8 +81,12 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
             if not analysis_row.empty:
                 current_price = analysis_row.iloc[0]['current_price']
                 target_price = buy_value * (1 + float(revenue_percentage) / 100)
-                
-                if current_price >= target_price:
+
+                # Check stop-loss hit (trailing stop)
+                stop_loss = row.get('stop_loss')
+                stop_hit = pd.notna(stop_loss) and current_price <= stop_loss
+
+                if current_price >= target_price or stop_hit:
                     sell_date = datetime.today().date()
                     buy_date = pd.to_datetime(row['buy_date']).date()
                     days_diff = (sell_date - buy_date).days
@@ -93,6 +97,8 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                     df_transactions.at[idx, 'sell_date'] = sell_date
                     df_transactions.at[idx, 'buy_sell_days_diff'] = days_diff
                     df_transactions.at[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
+                    if stop_hit:
+                        logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
         except Exception as e:
             logger.error(f"❌ Error processing transaction row {idx}: {e}. Skipping.")
 
