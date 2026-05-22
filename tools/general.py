@@ -115,12 +115,12 @@ def apply_technical_filter(llm_decision, custom_opinion, llm_confidence=0.5):
 
     Both opinions are weighted by their respective confidence levels:
       - LLM weight = llm_confidence (0.0 to 1.0, from GPT's self-reported conviction)
-      - Technical weight = abs(custom_conf) (0.0 to 1.0, from quantitative scoring)
+      - Technical weight = abs(custom_conf) × 1.2 (data-driven gets higher weight)
     Each opinion contributes to a combined score: BUY=+1, SELL=-1, HOLD=0.
 
     Rules:
-      - BUY requires strong combined score (>= 0.6)
-      - SELL requires strong negative score (<= -0.6)
+      - BUY requires combined score >= 0.5
+      - SELL requires combined score <= -0.5
       - Everything else → HOLD (not enough consensus)
     """
     custom_decision = extract_custom_decision(custom_opinion)

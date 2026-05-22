@@ -292,6 +292,8 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         df['date'] = pd.to_datetime(df['date'], utc=True)
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
         df['open'] = pd.to_numeric(df['open'], errors='coerce')
+        df['high'] = pd.to_numeric(df.get('high', df['close']), errors='coerce')
+        df['low'] = pd.to_numeric(df.get('low', df['close']), errors='coerce')
 
         if len(df) < 200:
             raise ValueError("Insufficient data: at least 200 rows required.")
@@ -327,7 +329,10 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         # Volatilidad histórica
         df["daily_return"] = df["close"].pct_change()
         df["volatility_20"] = df["daily_return"].rolling(20).std()
-        df["atr_14"] = (df["close"] - df["open"]).abs().rolling(14).mean()
+        tr1 = df["high"] - df["low"]
+        tr2 = (df["high"] - df["close"].shift(1)).abs()
+        tr3 = (df["low"] - df["close"].shift(1)).abs()
+        df["atr_14"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean()
 
         # Breakout 20 días
         df["breakout_20"] = df["close"] > df["close"].rolling(20).max().shift(1)
@@ -352,8 +357,6 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         # -------------------------
         # NEW: ADX (trend strength)
         # -------------------------
-        df["high"] = pd.to_numeric(df.get("high", df["close"]), errors="coerce")
-        df["low"] = pd.to_numeric(df.get("low", df["close"]), errors="coerce")
         adx_series, plus_di_series, minus_di_series = _compute_adx(df)
         df["adx"] = adx_series
         df["plus_di"] = plus_di_series
