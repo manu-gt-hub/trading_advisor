@@ -206,26 +206,65 @@ def test_generate_action_column_force_llm():
         assert df_result.loc[i, 'action'] == exp, f"[LLM1] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
 
-# Test: generate_action_column DEFAULT with consensus (LLM + technical)
+# Test: generate_action_column DEFAULT with weighted consensus (1.2x tech, threshold 0.5)
 def test_generate_action_column_default_consensus():
     df_test = pd.DataFrame({
-        'symbol': ['AAPL', 'MSFT', 'GOOGL'],
+        'symbol': [
+            'CLEAR_BUY',       # Both agree BUY → BUY
+            'CLEAR_SELL',      # Both agree SELL → SELL
+            'STRONG_HOLD',     # LLM HOLD 70% blocks weak tech BUY 0.50 → HOLD
+            'BORDERLINE_BUY',  # LLM HOLD 50% + decent tech BUY 0.65 → BUY (tech strong enough)
+            'HOLD_OVERRIDES',  # LLM BUY + strong tech HOLD 0.70 → HOLD (tech weight blocks)
+            'WEAK_HOLD_PASS',  # LLM BUY + very weak tech HOLD 0.30 → BUY (weak HOLD can't block)
+            'DISAGREEMENT',    # LLM SELL + tech BUY → HOLD (conflict)
+            'NO_TECH',         # LLM BUY + no technical → BUY (fallback)
+            'LLM_ERROR',       # LLM error + tech BUY 0.60 → BUY (fallback)
+            'STRONG_TECH_BUY', # LLM HOLD 70% + strong tech BUY 0.65 → BUY (tech passes scrutiny)
+        ],
         'llm_opinion': [
-            'BUY - Strong momentum.',     # GPT=BUY, technical=HOLD → HOLD
-            'SELL - Weak trend.',          # GPT=SELL, technical=SELL → SELL
-            'BUY - Uptrend.',              # GPT=BUY, no technical → BUY (fallback)
+            '80% BUY - All indicators align.',           # clear BUY
+            '75% SELL - Breakdown confirmed.',            # clear SELL
+            '70% HOLD - RSI divergence risk.',            # skeptical LLM blocks weak tech
+            '50% HOLD - Minor concerns.',                 # mild LLM skepticism
+            'BUY - Looks good.',                          # LLM says BUY but tech disagrees
+            'BUY - Momentum up.',                         # LLM BUY vs very weak tech HOLD
+            '60% SELL - Bearish divergence.',              # LLM SELL vs tech BUY
+            'BUY - Uptrend.',                             # no tech data
+            'error: API timeout',                         # LLM failed
+            '70% HOLD - Overbought near resistance.',     # skeptical but tech is strong
         ],
         'manual_financial_analysis': [
-            '0.40 HOLD',
-            '0.70 SELL',
-            None,
+            '0.70 BUY',    # both agree → BUY
+            '0.60 SELL',   # both agree → SELL
+            '0.50 BUY',    # weak tech BUY blocked by strong LLM HOLD
+            '0.65 BUY',    # decent tech BUY passes mild LLM skepticism
+            '0.70 HOLD',   # strong tech HOLD blocks LLM BUY
+            '0.30 HOLD',   # very weak tech HOLD overridden by LLM BUY
+            '0.60 BUY',    # tech BUY but LLM SELL → conflict
+            None,           # no tech → fallback to LLM
+            '0.60 BUY',    # LLM error → fallback to tech
+            '0.65 BUY',    # strong tech survives LLM scrutiny
         ],
     })
     df_result = generate_action_column(df_test.copy(), opinion_type="DEFAULT")
 
-    expected = ['HOLD', 'SELL', 'BUY']
-    for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'action'] == exp, f"[DEFAULT consensus] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
+    # Expected results with weighted consensus (1.2x tech, threshold ≥0.5)
+    expected = {
+        'CLEAR_BUY': 'BUY',         # both agree, easy
+        'CLEAR_SELL': 'SELL',        # both agree, easy
+        'STRONG_HOLD': 'HOLD',      # LLM HOLD 70% blocks weak tech BUY 0.50 (norm=0.46)
+        'BORDERLINE_BUY': 'BUY',    # mild HOLD + decent tech → passes (norm=0.61)
+        'HOLD_OVERRIDES': 'HOLD',   # strong tech HOLD outweighs LLM BUY (norm=0.37)
+        'WEAK_HOLD_PASS': 'BUY',    # very weak HOLD can't block LLM BUY (norm=0.58)
+        'DISAGREEMENT': 'HOLD',     # SELL vs BUY → conflict (norm=0.09)
+        'NO_TECH': 'BUY',           # fallback to LLM
+        'LLM_ERROR': 'BUY',         # fallback to tech (conf 0.60 ≥ 0.5)
+        'STRONG_TECH_BUY': 'BUY',   # tech survives LLM scrutiny (norm=0.53)
+    }
+    for i, symbol in enumerate(df_test['symbol']):
+        exp = expected[symbol]
+        got = df_result.loc[i, 'action']
+        assert got == exp, f"[DEFAULT consensus] {symbol}: expected {exp}, got {got}"
 
 # Test: generate_action_column with force_opinion = LLM2
 def test_generate_action_column_force_llm_2():
