@@ -248,18 +248,18 @@ def test_generate_action_column_default_consensus():
     })
     df_result = generate_action_column(df_test.copy(), opinion_type="DEFAULT")
 
-    # Expected results with weighted consensus (1.2x tech, threshold ≥0.5)
+    # Expected results with equal weighting, threshold ≥0.6, LLM SELL veto
     expected = {
-        'CLEAR_BUY': 'BUY',         # both agree, easy
-        'CLEAR_SELL': 'SELL',        # both agree, easy
-        'STRONG_HOLD': 'HOLD',      # LLM HOLD 70% blocks weak tech BUY 0.50 (norm=0.46)
-        'BORDERLINE_BUY': 'BUY',    # mild HOLD + decent tech → passes (norm=0.61)
-        'HOLD_OVERRIDES': 'HOLD',   # strong tech HOLD outweighs LLM BUY (norm=0.37)
-        'WEAK_HOLD_PASS': 'BUY',    # very weak HOLD can't block LLM BUY (norm=0.58)
+        'CLEAR_BUY': 'BUY',         # both agree, easy (norm=1.0)
+        'CLEAR_SELL': 'SELL',        # both agree, easy (norm=-1.0)
+        'STRONG_HOLD': 'HOLD',      # LLM HOLD 70% blocks weak tech BUY 0.50 (norm=0.38)
+        'BORDERLINE_BUY': 'HOLD',   # mild HOLD + decent tech (norm=0.57 < 0.6 threshold)
+        'HOLD_OVERRIDES': 'HOLD',   # strong tech HOLD outweighs LLM BUY (norm=0.30)
+        'WEAK_HOLD_PASS': 'BUY',    # very weak HOLD can't block LLM BUY (norm=0.63)
         'DISAGREEMENT': 'HOLD',     # SELL vs BUY → conflict (norm=0.09)
         'NO_TECH': 'BUY',           # fallback to LLM
         'LLM_ERROR': 'BUY',         # fallback to tech (conf 0.60 ≥ 0.5)
-        'STRONG_TECH_BUY': 'BUY',   # tech survives LLM scrutiny (norm=0.53)
+        'STRONG_TECH_BUY': 'HOLD',  # LLM HOLD 70% vs tech BUY 0.65 (norm=0.48 < 0.6)
     }
     for i, symbol in enumerate(df_test['symbol']):
         exp = expected[symbol]

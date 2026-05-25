@@ -30,7 +30,7 @@ def load_config():
         "buy_file_id": os.environ.get("BUY_RECOMMENDATIONS_ID"),
         "analysis_file_id": os.environ.get("ANALYSIS_FILE_ID"),
         "force_opinion": os.environ.get("FORCE_OPINION"),
-        "min_buy_confidence": float(os.environ.get("MIN_BUY_CONFIDENCE", 0.5)),
+        "min_buy_confidence": float(os.environ.get("MIN_BUY_CONFIDENCE", 0.6)),
         "news_sent_analysis": os.environ.get("NEWS_SENT_ANALYSIS", "false").lower() == "true",
     }
 
