@@ -84,8 +84,15 @@ def enrich_analysis_df(df, analysis, force_opinion):
             # Store LLM confidence
             df.loc[df['symbol'] == symbol, 'llm_confidence'] = extract_llm_confidence(llm_opinion)
 
-            # Technical evaluation as safety filter over LLM decision
-            custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']}"
+            # Technical evaluation with key indicators inline
+            sigs = metrics['signals']
+            indicator_parts = []
+            for key in ['RSI', 'MACD', 'ADX', 'SMA_50', 'SMA_200', 'ATR_14', 'Volatility_20', 'ROC_10', 'Stoch_RSI_K', 'Market_Trend']:
+                if key in sigs and sigs[key] is not None:
+                    val = sigs[key]
+                    indicator_parts.append(f"{key}={round(val, 2) if isinstance(val, float) else val}")
+            indicators_str = ', '.join(indicator_parts)
+            custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']} | {indicators_str}"
             general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
 
             # Store numeric confidence for filtering
@@ -226,6 +233,7 @@ def main(show_dataframes=False):
                     row['symbol'],
                     news_sentiment_enabled=config["news_sent_analysis"]
                 )
+                # Write sentiment back to analysis_df so it appears in Google Drive
                 analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'news_sentiment'] = (
                     news_result['news_sentiment']['summary']
                 )
