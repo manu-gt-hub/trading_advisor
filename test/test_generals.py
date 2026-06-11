@@ -12,7 +12,7 @@ from general import (
     extract_llm_confidence,
     extract_custom_decision,
     extract_custom_confidence,
-    apply_technical_filter,
+    apply_audit_veto,
     decide_final_action,
     generate_action_column,
     add_urls_column
@@ -126,26 +126,27 @@ def test_decide_final_action_with_custom_tiebreaker():
 
 
 
-# Test: generate_action_column (DEFAULT = consensus LLM + technical)
+# Test: generate_action_column (DEFAULT = technical decides, LLM only audits BUY)
 def test_generate_action_column_default():
     df_test = pd.DataFrame({
         'symbol': ['AAPL', 'MSFT', 'GOOGL', 'AMZN'],
         'llm_opinion': [
-            'BUY - Strong momentum.',           # BUY, technical SELL → HOLD (disagreement)
-            'BUY - All indicators up.',          # BUY, technical BUY → BUY (consensus)
-            'SELL - Bearish trend.',              # SELL, technical BUY → HOLD (disagreement)
-            'SELL - Weak momentum.',              # SELL, technical SELL → SELL (consensus)
+            'COHERENT | adj=+0.05 | aligned',      # technical BUY, audit OK → BUY
+            'INCOHERENT | adj=-0.30 | divergence', # technical BUY, audit veto → HOLD
+            'SELL - LLM not called (technical decides)',  # technical SELL → SELL
+            'HOLD - LLM not called (technical decides)',  # technical HOLD → HOLD
         ],
         'manual_financial_analysis': [
-            '0.40 SELL',
-            '0.60 BUY',
-            '0.55 BUY',
-            '0.70 SELL',
+            '0.60 BUY | regime=TRENDING_UP',
+            '0.55 BUY | regime=TRENDING_UP',
+            '-0.40 SELL | regime=TRENDING_DOWN',
+            '0.10 HOLD | regime=RANGE',
         ],
     })
     df_result = generate_action_column(df_test.copy(), "DEFAULT")
 
-    expected = ['HOLD', 'BUY', 'HOLD', 'SELL']
+    # Technical engine decides; LLM audit only downgrades a BUY to HOLD on INCOHERENT
+    expected = ['BUY', 'HOLD', 'SELL', 'HOLD']
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
@@ -159,40 +160,23 @@ def test_extract_custom_confidence():
     assert extract_custom_confidence(123) == 0.0
 
 
-# Test: apply_technical_filter (consensus logic with confidence weighting)
-def test_apply_technical_filter():
-    # === CONSENSUS: BUY only when both agree ===
-    # LLM BUY(0.5) + technical BUY(0.6) → BUY (both agree)
-    assert apply_technical_filter('BUY', '0.60 BUY') == 'BUY'
-    # LLM BUY(0.5) + technical SELL(0.35) → HOLD (disagreement)
-    assert apply_technical_filter('BUY', '0.35 SELL') == 'HOLD'
-    # LLM BUY(0.5) + technical HOLD(0.50) → HOLD (not enough consensus)
-    assert apply_technical_filter('BUY', '0.50 HOLD') == 'HOLD'
+# Test: apply_audit_veto (LLM may ONLY downgrade a technical BUY to HOLD on INCOHERENT)
+def test_apply_audit_veto():
+    # Technical BUY + INCOHERENT audit → HOLD (veto)
+    assert apply_audit_veto('BUY', 'INCOHERENT | adj=-0.30 | bearish divergence') == 'HOLD'
+    # Technical BUY + COHERENT audit → BUY (no veto)
+    assert apply_audit_veto('BUY', 'COHERENT | adj=+0.05 | aligned') == 'BUY'
 
-    # === CONSENSUS: SELL only when both agree ===
-    # LLM SELL(0.5) + technical SELL(0.8) → SELL (both agree)
-    assert apply_technical_filter('SELL', '0.80 SELL') == 'SELL'
-    # LLM SELL(0.5) + technical BUY(0.55) → HOLD (disagreement)
-    assert apply_technical_filter('SELL', '0.55 BUY') == 'HOLD'
+    # Veto applies ONLY to BUY — never flips SELL or HOLD
+    assert apply_audit_veto('SELL', 'INCOHERENT | adj=-0.30 | whatever') == 'SELL'
+    assert apply_audit_veto('HOLD', 'INCOHERENT | adj=-0.30 | whatever') == 'HOLD'
 
-    # === LLM confidence matters ===
-    # High-conf LLM BUY(0.9) + low-conf technical HOLD(0.1) → BUY (LLM dominates)
-    assert apply_technical_filter('BUY', '0.10 HOLD', llm_confidence=0.9) == 'BUY'
-    # Low-conf LLM BUY(0.2) + high-conf technical SELL(0.8) → SELL (technical dominates)
-    assert apply_technical_filter('BUY', '0.80 SELL', llm_confidence=0.2) == 'SELL'
-    # Equal conf, disagreement → HOLD
-    assert apply_technical_filter('BUY', '0.50 SELL', llm_confidence=0.5) == 'HOLD'
+    # LLM can never create or upgrade a signal — non-BUY stays as technical decided
+    assert apply_audit_veto('HOLD', 'COHERENT | adj=+0.10 | strong') == 'HOLD'
 
-    # === HOLD from LLM, strong technical can promote ===
-    # LLM HOLD(0.3) + technical BUY(0.8) → BUY (technical strong enough)
-    assert apply_technical_filter('HOLD', '0.80 BUY', llm_confidence=0.3) == 'BUY'
-    # LLM HOLD(0.3) + technical SELL(0.8) → SELL (technical strong enough)
-    assert apply_technical_filter('HOLD', '0.80 SELL', llm_confidence=0.3) == 'SELL'
-
-    # === Error/fallback cases ===
-    assert apply_technical_filter(None, '0.50 BUY') == 'BUY'
-    assert apply_technical_filter(None, '0.30 BUY') is None
-    assert apply_technical_filter('BUY', None) == 'BUY'
+    # Missing/empty audit → keep technical decision
+    assert apply_audit_veto('BUY', None) == 'BUY'
+    assert apply_audit_veto('BUY', '') == 'BUY'
 
 
 # Test: generate_action_column with force_opinion = LLM1 (GPT only, no consensus)
@@ -206,65 +190,44 @@ def test_generate_action_column_force_llm():
         assert df_result.loc[i, 'action'] == exp, f"[LLM1] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
 
-# Test: generate_action_column DEFAULT with weighted consensus (1.2x tech, threshold 0.5)
-def test_generate_action_column_default_consensus():
+# Test: DEFAULT — technical engine is the sole decider; the LLM cannot create a BUY
+def test_generate_action_column_default_technical_decides():
     df_test = pd.DataFrame({
         'symbol': [
-            'CLEAR_BUY',       # Both agree BUY → BUY
-            'CLEAR_SELL',      # Both agree SELL → SELL
-            'STRONG_HOLD',     # LLM HOLD 70% blocks weak tech BUY 0.50 → HOLD
-            'BORDERLINE_BUY',  # LLM HOLD 50% + decent tech BUY 0.65 → BUY (tech strong enough)
-            'HOLD_OVERRIDES',  # LLM BUY + strong tech HOLD 0.70 → HOLD (tech weight blocks)
-            'WEAK_HOLD_PASS',  # LLM BUY + very weak tech HOLD 0.30 → BUY (weak HOLD can't block)
-            'DISAGREEMENT',    # LLM SELL + tech BUY → HOLD (conflict)
-            'NO_TECH',         # LLM BUY + no technical → BUY (fallback)
-            'LLM_ERROR',       # LLM error + tech BUY 0.60 → BUY (fallback)
-            'STRONG_TECH_BUY', # LLM HOLD 70% + strong tech BUY 0.65 → BUY (tech passes scrutiny)
+            'TECH_BUY_OK',        # technical BUY, audit COHERENT → BUY
+            'TECH_BUY_VETOED',    # technical BUY, audit INCOHERENT → HOLD
+            'TECH_SELL',          # technical SELL (no LLM) → SELL
+            'TECH_HOLD',          # technical HOLD (no LLM) → HOLD
+            'LLM_CANNOT_CREATE',  # technical HOLD even if audit text mentions BUY → HOLD
         ],
         'llm_opinion': [
-            '80% BUY - All indicators align.',           # clear BUY
-            '75% SELL - Breakdown confirmed.',            # clear SELL
-            '70% HOLD - RSI divergence risk.',            # skeptical LLM blocks weak tech
-            '50% HOLD - Minor concerns.',                 # mild LLM skepticism
-            'BUY - Looks good.',                          # LLM says BUY but tech disagrees
-            'BUY - Momentum up.',                         # LLM BUY vs very weak tech HOLD
-            '60% SELL - Bearish divergence.',              # LLM SELL vs tech BUY
-            'BUY - Uptrend.',                             # no tech data
-            'error: API timeout',                         # LLM failed
-            '70% HOLD - Overbought near resistance.',     # skeptical but tech is strong
+            'COHERENT | adj=+0.08 | trend+momentum aligned',
+            'INCOHERENT | adj=-0.30 | overbought exhaustion',
+            'SELL - LLM not called (technical decides)',
+            'HOLD - LLM not called (technical decides)',
+            'COHERENT | adj=+0.10 | would be a great BUY',
         ],
         'manual_financial_analysis': [
-            '0.70 BUY',    # both agree → BUY
-            '0.60 SELL',   # both agree → SELL
-            '0.50 BUY',    # weak tech BUY blocked by strong LLM HOLD
-            '0.65 BUY',    # decent tech BUY passes mild LLM skepticism
-            '0.70 HOLD',   # strong tech HOLD blocks LLM BUY
-            '0.30 HOLD',   # very weak tech HOLD overridden by LLM BUY
-            '0.60 BUY',    # tech BUY but LLM SELL → conflict
-            None,           # no tech → fallback to LLM
-            '0.60 BUY',    # LLM error → fallback to tech
-            '0.65 BUY',    # strong tech survives LLM scrutiny
+            '0.62 BUY | regime=TRENDING_UP',
+            '0.58 BUY | regime=TRENDING_UP',
+            '-0.45 SELL | regime=TRENDING_DOWN',
+            '0.05 HOLD | regime=RANGE',
+            '0.05 HOLD | regime=RANGE',
         ],
     })
     df_result = generate_action_column(df_test.copy(), opinion_type="DEFAULT")
 
-    # Expected results with equal weighting, threshold ≥0.6, LLM SELL veto
     expected = {
-        'CLEAR_BUY': 'BUY',         # both agree, easy (norm=1.0)
-        'CLEAR_SELL': 'SELL',        # both agree, easy (norm=-1.0)
-        'STRONG_HOLD': 'HOLD',      # LLM HOLD 70% blocks weak tech BUY 0.50 (norm=0.38)
-        'BORDERLINE_BUY': 'HOLD',   # mild HOLD + decent tech (norm=0.57 < 0.6 threshold)
-        'HOLD_OVERRIDES': 'HOLD',   # strong tech HOLD outweighs LLM BUY (norm=0.30)
-        'WEAK_HOLD_PASS': 'BUY',    # very weak HOLD can't block LLM BUY (norm=0.63)
-        'DISAGREEMENT': 'HOLD',     # SELL vs BUY → conflict (norm=0.09)
-        'NO_TECH': 'BUY',           # fallback to LLM
-        'LLM_ERROR': 'BUY',         # fallback to tech (conf 0.60 ≥ 0.5)
-        'STRONG_TECH_BUY': 'HOLD',  # LLM HOLD 70% vs tech BUY 0.65 (norm=0.48 < 0.6)
+        'TECH_BUY_OK': 'BUY',
+        'TECH_BUY_VETOED': 'HOLD',
+        'TECH_SELL': 'SELL',
+        'TECH_HOLD': 'HOLD',
+        'LLM_CANNOT_CREATE': 'HOLD',
     }
     for i, symbol in enumerate(df_test['symbol']):
         exp = expected[symbol]
         got = df_result.loc[i, 'action']
-        assert got == exp, f"[DEFAULT consensus] {symbol}: expected {exp}, got {got}"
+        assert got == exp, f"[DEFAULT technical-decides] {symbol}: expected {exp}, got {got}"
 
 # Test: generate_action_column with force_opinion = LLM2
 def test_generate_action_column_force_llm_2():

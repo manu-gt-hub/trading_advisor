@@ -109,73 +109,23 @@ def extract_custom_confidence(opinion):
     except (ValueError, IndexError):
         return 0.0
 
-def apply_technical_filter(llm_decision, custom_opinion, llm_confidence=0.5):
+def apply_audit_veto(technical_decision, llm_opinion):
     """
-    Contrast LLM decision against technical evaluation to produce a consensus.
+    The technical engine is the SOLE decider. The LLM is an AUDITOR, not a second
+    decision system: it can ONLY downgrade a technical BUY to HOLD when it flags the
+    setup INCOHERENT. It can never create, upgrade, or flip a signal on its own.
 
-    Both opinions are weighted by their respective confidence levels:
-      - LLM weight = llm_confidence (0.0 to 1.0, from GPT's self-reported conviction)
-      - Technical weight = abs(custom_conf) × 1.2 (data-driven gets higher weight)
-    Each opinion contributes to a combined score: BUY=+1, SELL=-1, HOLD=0.
+    Parameters:
+        technical_decision (str): The deterministic technical signal ('BUY'/'SELL'/'HOLD').
+        llm_opinion (str): The auditor output, e.g. 'INCOHERENT | adj=-0.30 | reason'.
 
-    Rules:
-      - BUY requires combined score >= 0.5
-      - SELL requires combined score <= -0.5
-      - Everything else → HOLD (not enough consensus)
+    Returns:
+        str: The final action after applying the (BUY-only) incoherence veto.
     """
-    custom_decision = extract_custom_decision(custom_opinion)
-    custom_conf = extract_custom_confidence(custom_opinion)
-
-    error_values = [None, 'error', 'ERROR', 'EMPTY_DECISION', 'EVALUATION_FAILED']
-
-    if llm_decision in error_values:
-        # If LLM fails, fall back to technical if available
-        if custom_decision not in error_values:
-            if custom_conf >= 0.5:
-                logger.info(f"Consensus: LLM unavailable, using technical ({custom_decision}, conf={custom_conf:.2f})")
-                return custom_decision
-        return llm_decision
-
-    if custom_decision in error_values:
-        return llm_decision
-
-    # Score mapping
-    score_map = {'BUY': 1.0, 'SELL': -1.0, 'HOLD': 0.0}
-
-    llm_score = score_map.get(llm_decision, 0.0)
-    custom_score = score_map.get(custom_decision, 0.0)
-
-    # Weighted combination: equal weighting between LLM and technical
-    llm_weight = max(llm_confidence, 0.1)  # minimum 0.1 so LLM always counts
-    tech_weight = max(abs(custom_conf), 0.1)  # no boost: both sources equally trusted
-
-    combined = (llm_score * llm_weight) + (custom_score * tech_weight)
-    total_weight = llm_weight + tech_weight
-
-    # Normalize to [-1, 1]
-    normalized = combined / total_weight if total_weight > 0 else 0.0
-
-    # Decision thresholds — stricter consensus to reduce false BUYs
-    if normalized >= 0.6:
-        result = 'BUY'
-    elif normalized <= -0.6:
-        result = 'SELL'
-    else:
-        result = 'HOLD'
-
-    # LLM veto: if LLM explicitly says SELL, never override to BUY
-    if result == 'BUY' and llm_decision == 'SELL':
-        result = 'HOLD'
-        logger.info(f"Consensus: BUY vetoed — LLM says SELL (conf={llm_confidence:.2f})")
-
-    if result != llm_decision:
-        logger.info(
-            f"Consensus: LLM={llm_decision}(conf={llm_confidence:.2f}), "
-            f"Technical={custom_decision}(conf={custom_conf:.2f}) "
-            f"→ combined={normalized:.2f} → {result}"
-        )
-
-    return result
+    if technical_decision == 'BUY' and isinstance(llm_opinion, str) and 'INCOHERENT' in llm_opinion.upper():
+        logger.info("Audit veto: technical BUY downgraded to HOLD — LLM flagged INCOHERENT")
+        return 'HOLD'
+    return technical_decision
 
 # Function to decide final action based on both opinions
 def decide_final_action(llm_decision, llm_2_decision, custom_decision=None, custom_confidence=None):
@@ -272,19 +222,18 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
 
         df['action'] = df['manual_financial_analysis'].apply(extract_custom_decision)
 
-    else:  # Default logic: consensus between LLM1 and custom technical analysis
-        logger.debug("set decision logic as DEFAULT (consensus LLM + technical)")
+    else:  # Default logic: technical engine decides; LLM only audits BUY signals
+        logger.debug("set decision logic as DEFAULT (technical decides, LLM audits)")
 
-        df['action'] = df['llm_opinion'].apply(extract_llm_decision)
-        df['_llm_conf'] = df['llm_opinion'].apply(extract_llm_confidence)
         if 'manual_financial_analysis' in df.columns:
-            df['action'] = df.apply(
-                lambda row: apply_technical_filter(
-                    row['action'], row['manual_financial_analysis'], row['_llm_conf']
-                ),
-                axis=1
-            )
-        df = df.drop(columns=['_llm_conf'])
+            df['action'] = df['manual_financial_analysis'].apply(extract_custom_decision)
+            if 'llm_opinion' in df.columns:
+                df['action'] = df.apply(
+                    lambda row: apply_audit_veto(row['action'], row['llm_opinion']),
+                    axis=1
+                )
+        else:
+            df['action'] = df['llm_opinion'].apply(extract_llm_decision)
 
     return df
 

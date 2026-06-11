@@ -5,7 +5,6 @@ import os
 import pandas as pd
 import logging
 from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms, news_sentiment
-from tools.general import extract_llm_confidence
 from tools.risk_management import compute_stop_loss_take_profit, filter_correlated_buys
 import numpy as np
 
@@ -66,25 +65,36 @@ def enrich_analysis_df(df, analysis, force_opinion):
         symbol = item["symbol"]
         try:
             metrics = item["metrics"]
+            evaluation = metrics["evaluation"]
+            confidence = metrics.get("confidence", 0.0)
 
-            # Only call LLM for BUY candidates — skip SELL/HOLD/FAILED to save API costs
-            if "failed" not in metrics["evaluation"] and metrics["evaluation"] == "BUY":
-                llm_opinion = llms.get_gpt_signals_analysis(
-                    metrics["signals"], symbol, item["current_price"],
-                    technical_evaluation=metrics["evaluation"],
-                    confidence=metrics["confidence"]
+            # The technical engine is the SOLE decider. The LLM is invoked ONLY when
+            # the technical signal is BUY, and only to AUDIT it (adjust confidence /
+            # flag incoherence). It never re-classifies the signal.
+            if evaluation == "BUY":
+                technical_result = {
+                    "regime": metrics.get("regime"),
+                    "strength": metrics.get("strength"),
+                    "sub_scores": metrics.get("sub_scores", {}),
+                }
+                audit = llms.audit_buy_signal(
+                    metrics["signals"], symbol, item["current_price"], technical_result
                 )
-            elif "failed" not in metrics["evaluation"]:
-                llm_opinion = f"50% {metrics['evaluation']} - technical signal, LLM skipped"
+                # Apply the bounded confidence adjustment from the auditor
+                confidence = max(-1.0, min(1.0, confidence + audit["adjustment"]))
+                coherence = "COHERENT" if audit["coherent"] else "INCOHERENT"
+                llm_opinion = f"{coherence} | adj={audit['adjustment']:+.2f} | {audit['reason']}"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = round(audit["adjustment"], 4)
+            elif "failed" not in evaluation:
+                llm_opinion = f"{evaluation} - LLM not called (technical decides)"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
             else:
                 llm_opinion = "error: metrics not provided"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
 
             general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
 
-            # Store LLM confidence
-            df.loc[df['symbol'] == symbol, 'llm_confidence'] = extract_llm_confidence(llm_opinion)
-
-            # Technical evaluation with key indicators inline
+            # Structured, deterministic technical label (signal + regime + sub-scores)
             sigs = metrics['signals']
             indicator_parts = []
             for key in ['RSI', 'MACD', 'ADX', 'SMA_50', 'SMA_200', 'ATR_14', 'Volatility_20', 'ROC_10', 'Stoch_RSI_K', 'Market_Trend']:
@@ -92,11 +102,18 @@ def enrich_analysis_df(df, analysis, force_opinion):
                     val = sigs[key]
                     indicator_parts.append(f"{key}={round(val, 2) if isinstance(val, float) else val}")
             indicators_str = ', '.join(indicator_parts)
-            custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']} | {indicators_str}"
+            sub = metrics.get("sub_scores", {})
+            structured = (
+                f"regime={metrics.get('regime', 'UNKNOWN')}, "
+                f"strength={metrics.get('strength', 'UNKNOWN')}, "
+                f"trend={sub.get('trend_score')}, momentum={sub.get('momentum_score')}, "
+                f"risk={sub.get('risk_score')}"
+            )
+            custom_label = f"{confidence:.2f} {evaluation} | {structured} | {indicators_str}"
             general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
 
-            # Store numeric confidence for filtering
-            df.loc[df['symbol'] == symbol, 'technical_confidence'] = metrics['confidence']
+            # Store numeric (audited) confidence for filtering
+            df.loc[df['symbol'] == symbol, 'technical_confidence'] = confidence
 
             # Compute stop-loss and take-profit levels
             atr = metrics['signals'].get('ATR_14')
