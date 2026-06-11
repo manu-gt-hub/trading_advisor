@@ -194,6 +194,11 @@ def main(show_dataframes=False):
     # Enrich analysis_df with opinions
     analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])
 
+    # Ensure news columns always exist in the saved output, even when there are no
+    # BUY candidates (the news filter below only populates them for BUY rows).
+    analysis_df['news_sentiment'] = "Not evaluated (no BUY candidate)"
+    analysis_df['earnings_soon'] = False
+
     # Filter to only BUY recommendations with sufficient confidence
     min_conf = config["min_buy_confidence"]
     buy_df = analysis_df[
