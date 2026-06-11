@@ -179,3 +179,7 @@ resources/
 ## ⚠️ Disclaimer
 
 This repository is for **educational and personal use only**. It is not financial advice. Trading involves risk of loss. Use responsibly and at your own risk.
+
+## 📄 License
+
+Proprietary / Educational license — personal, educational, and **non-commercial** use only. See [`LICENSE`](LICENSE) for the full terms. Commercial use requires prior written consent from the copyright holder.
