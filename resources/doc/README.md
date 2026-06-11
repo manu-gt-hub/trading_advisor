@@ -1,33 +1,33 @@
-# Documentación — Trading Advisor
+# Documentation — Trading Advisor
 
-Esta carpeta documenta **en detalle** cómo el sistema analiza las métricas técnicas y genera las decisiones **BUY / HOLD / SELL**.
+This folder documents **in detail** how the system analyzes technical metrics and generates the **BUY / HOLD / SELL** decisions.
 
-## Principio rector
+## Guiding principle
 
-> **El sistema técnico decide. El LLM solo audita.**
+> **The technical system decides. The LLM only audits.**
 
-Un motor determinista por capas (`tools/technical_engine.py`) produce todas las señales. El LLM (GPT) se invoca **únicamente cuando la señal técnica es BUY** y solo puede (1) marcar incoherencias y (2) ajustar la confianza final dentro de límites. Nunca re-clasifica.
+A deterministic layered engine (`tools/technical_engine.py`) produces every signal. The LLM (GPT) is invoked **only when the technical signal is BUY** and can only (1) flag incoherences and (2) adjust the final confidence within bounds. It never re-classifies.
 
-## Índice
+## Index
 
-| Documento | Contenido |
+| Document | Content |
 |---|---|
-| [`01_arquitectura.md`](01_arquitectura.md) | Visión general, componentes y flujo de datos de extremo a extremo |
-| [`02_indicadores_y_capas.md`](02_indicadores_y_capas.md) | Las 3 capas (trend / momentum / risk), cada indicador, su normalización y sus pesos |
-| [`03_regimen_y_decision.md`](03_regimen_y_decision.md) | Clasificador de régimen (SMA + ADX) y cómo se generan BUY / HOLD / SELL |
-| [`04_auditoria_llm.md`](04_auditoria_llm.md) | Rol exacto del LLM como auditor (coherencia + ajuste de confianza) |
-| [`05_pipeline_y_filtros.md`](05_pipeline_y_filtros.md) | Pipeline de `main.py`: filtros de confianza, R:R, noticias, posiciones y correlación |
-| [`06_configuracion.md`](06_configuracion.md) | `technical_config.json` y variables de entorno |
+| [`01_architecture.md`](01_architecture.md) | Overview, components and end-to-end data flow |
+| [`02_indicators_and_layers.md`](02_indicators_and_layers.md) | The 3 layers (trend / momentum / risk), each indicator, its normalization and weights |
+| [`03_regime_and_decision.md`](03_regime_and_decision.md) | Regime classifier (SMA + ADX) and how BUY / HOLD / SELL are generated |
+| [`04_llm_audit.md`](04_llm_audit.md) | The exact role of the LLM as an auditor (coherence + confidence adjustment) |
+| [`05_pipeline_and_filters.md`](05_pipeline_and_filters.md) | The `main.py` pipeline: confidence, R:R, news, position and correlation filters |
+| [`06_configuration.md`](06_configuration.md) | `technical_config.json` and environment variables |
 
-## Mapa rápido de código
+## Quick code map
 
 ```
-tools/technical_engine.py     # Motor por capas + clasificador de régimen + decisión (DECISOR ÚNICO)
-tools/custom_financial_calc.py# Cálculo de indicadores; construye el vector de features y delega en el motor
-tools/llms.py                 # Auditor GPT (audit_buy_signal) + helpers legacy
-tools/general.py              # Extracción de decisión + columna 'action' (técnica decide, LLM veta por incoherencia)
-main.py                       # Orquesta el pipeline completo
-resources/technical_config.json # Indicadores, pesos, reglas de régimen y umbrales
+tools/technical_engine.py       # Layered engine + regime classifier + decision (SOLE DECIDER)
+tools/custom_financial_calc.py  # Indicator computation; builds the feature vector and delegates to the engine
+tools/llms.py                   # GPT auditor (audit_buy_signal) + legacy helpers
+tools/general.py                # Decision extraction + 'action' column (technical decides, LLM veto on incoherence)
+main.py                         # Orchestrates the full pipeline
+resources/technical_config.json # Indicators, weights, regime rules and thresholds
 ```
 
-> Nota: los valores numéricos citados en estos documentos reflejan `resources/technical_config.json`. Si cambias el JSON, la lógica se adapta automáticamente (es config-driven); actualiza también estos `.md` si los pesos/umbrales cambian de forma relevante.
+> Note: the numeric values cited in these documents reflect `resources/technical_config.json`. If you change the JSON, the logic adapts automatically (it is config-driven); also update these `.md` files if weights/thresholds change significantly.
