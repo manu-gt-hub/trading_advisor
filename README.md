@@ -1,33 +1,32 @@
 # Trading Advisor
 
-Automated stock trading signal generator that combines **LLM analysis (GPT)** with **quantitative technical analysis** to produce consensus-based BUY/HOLD/SELL recommendations. Runs daily via GitHub Actions and saves results to Google Drive.
+Automated stock trading signal generator driven by a **deterministic layered technical engine**. The technical system is the **sole decision maker**; the LLM (GPT) only **audits** BUY signals. Runs daily via GitHub Actions and saves results to Google Drive.
 
 ## 🚀 Features
 
 ### Decision Engine
-- **Weighted consensus system** — Technical model (1.2x weight) + GPT (1.0x weight), combined score must reach ≥0.5 for BUY
-- **LLM as devil's advocate** — GPT reviews setups critically, confirms BUY only when no significant risks are found
-- **Three modes** via `FORCE_OPINION`: `DEFAULT` (consensus), `LLM1` (GPT only), `CUSTOM` (technical only)
-- **LLM confidence** — GPT returns a 0-100% conviction score that weights its vote in the consensus
-- **MIN_BUY_CONFIDENCE** — Pre-filter: minimum technical confidence to enter consensus (0.0-1.0, default 0.5)
-- **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.5 (ATR-based stop-loss vs take-profit)
-- **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT)
-- **Position tracking** — Skips BUY if symbol already has an open (unsold) position
-- **Signal diversity scoring** — Penalizes confidence when BUY signal comes from < 3 independent categories (trend/momentum/volume/structure/context)
-- **Adaptive take-profit** — Uses the more conservative of fixed REVENUE_PERCENTAGE and 3×ATR
-- **Market day guard** — Skips execution on weekends and US holidays to avoid stale prices
-- **LLM cost optimization** — Only calls GPT for BUY candidates; SELL/HOLD signals skip LLM
+- **Technical engine decides** — A deterministic, config-driven engine (`technical_engine.py`) produces every BUY/HOLD/SELL signal. No LLM in the classification path.
+- **LLM as auditor only** — GPT is invoked **only when the technical signal is BUY**. It cannot re-classify; it may only (1) flag **INCOHERENT** setups (downgrading BUY→HOLD) and (2) apply a small **bounded confidence adjustment** (`[-0.3, +0.1]`).
+- **Three layers, clear hierarchy** — `trend`, `momentum`, and `risk` are computed independently, normalized to a common scale, and aggregated into explicit **sub-scores** (`trend_score`, `momentum_score`, `risk_score`).
+- **Explicit regime classifier** — `TRENDING_UP`, `TRENDING_DOWN`, `RANGE`, `DISTRIBUTION` based on **SMA(50/200) + ADX** (+DI/-DI). BUY is only allowed in `TRENDING_UP`.
+- **Structured, deterministic output** — `signal + strength + regime + sub_scores`, no narrative text.
+- **Indicators & weights in JSON** — All indicators, weights, regime rules and thresholds live in `resources/technical_config.json`.
+- **Modes** via `FORCE_OPINION`: `DEFAULT` (technical decides, LLM audits BUY), `CUSTOM` (technical only), `LLM1`/`LLM2` (legacy GPT-only override).
+- **MIN_BUY_CONFIDENCE** — Minimum (audited) technical confidence to accept a BUY (0.0-1.0, default 0.6).
+- **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.5 (ATR-based stop-loss vs take-profit).
+- **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT).
+- **Position tracking** — Skips BUY if symbol already has an open (unsold) position.
+- **Adaptive take-profit** — Uses the more conservative of fixed REVENUE_PERCENTAGE and 3×ATR.
+- **Market day guard** — Skips execution on weekends and US holidays to avoid stale prices.
+- **LLM cost optimization** — Only calls GPT to audit BUY candidates; SELL/HOLD signals skip the LLM entirely.
 
-### Technical Analysis (`custom_financial_calc.py`)
-- **Trend**: SMA 50/200, EMA 20, MA50 slope
-- **Momentum**: RSI, MACD (crossover + histogram), ROC 10, Stochastic RSI
-- **Volume**: OBV, volume breakout confirmation
-- **Volatility**: Bollinger Bands, ATR 14, historical volatility
-- **Support/Resistance**: Fibonacci retracements (38.2%, 50%, 61.8%)
-- **Patterns**: Candlestick detection (Hammer, Engulfing, Doji, Shooting Star)
-- **Trend Strength**: ADX with dynamic signal weighting (trending vs ranging regimes)
-- **Multi-timeframe**: Weekly MA10/MA30 and weekly RSI as confirmation layer
-- **Market Context**: S&P500 trend as macro filter
+### Technical Analysis (layered, `technical_engine.py` + `custom_financial_calc.py`)
+- **Layer 1 — Trend** `[-1, 1]`: SMA 50/200 cross, price vs SMA200, price vs EMA20/SMA50, MA50 slope, ADX direction (+DI/-DI).
+- **Layer 2 — Momentum** `[-1, 1]`: **RSI + MACD (primary)**, Stochastic RSI + ROC (secondary, lower weight).
+- **Layer 3 — Risk** `[0, 1]`: historical volatility, **volume confirmation / OBV divergence**, overbought exhaustion, **bearish divergences**. Volume and divergences are risk factors, not momentum.
+- **Regime classifier**: SMA + ADX → `TRENDING_UP` / `TRENDING_DOWN` / `RANGE` / `DISTRIBUTION`.
+- **Aggregation**: `directional = w_trend·trend_score + w_momentum·momentum_score`, then risk-penalized; regime gates the final signal.
+- **Supporting indicators** (reported but not in the core score): Bollinger Bands, ATR 14, Fibonacci retracements, candlestick patterns, weekly confirmation, S&P500 context.
 
 ### Risk Management (`risk_management.py`)
 - **Stop-loss**: ATR-based (2x ATR below entry)
@@ -84,7 +83,7 @@ pip install -r requirements.txt
 | `SYMBOLS_INTEREST_LIST` | Python list of tickers, e.g. `"['AAPL','MSFT']"` |
 | `REVENUE_PERCENTAGE` | Target profit % for take-profit (e.g., `10`) |
 | `FORCE_OPINION` | Decision mode: `DEFAULT`, `LLM1`, `LLM2`, `CUSTOM` |
-| `MIN_BUY_CONFIDENCE` | Minimum technical confidence to accept a BUY (0.0-1.0, default 0.5) |
+| `MIN_BUY_CONFIDENCE` | Single BUY threshold (0.0-1.0, default 0.6): the engine emits BUY only when the risk-adjusted score reaches it, and BUYs are also accepted post-audit against the same value |
 | `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
 | `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
 | `NEWS_SENT_ANALYSIS` | Enable news sentiment filter (`true`/`false`, default `false`) |
@@ -127,16 +126,15 @@ All tests are mocked — no external API calls. Google Drive tests (`test_google
 flowchart TD
     Z{Market day?} -->|weekend/holiday| X0[Skip execution]
     Z -->|weekday| A[Fetch quotes - Finnhub]
-    A -->|current prices| B[Technical analysis]
-    B -->|SELL/HOLD| S[LLM skipped<br>save API costs]
-    B -->|BUY candidate| C{MIN_BUY_CONFIDENCE<br>filter}
+    A -->|current prices| B[Layered technical engine<br>trend/momentum/risk + regime]
+    B -->|SELL/HOLD| S[LLM skipped<br>technical decides]
+    B -->|BUY signal| D[LLM AUDIT<br>coherence + bounded conf adj]
+    D -->|INCOHERENT| X2[Downgraded to HOLD]
+    D -->|COHERENT| C{MIN_BUY_CONFIDENCE<br>filter on audited conf}
     C -->|conf < threshold| X1[Discarded]
     C -->|conf >= threshold| P{Position<br>tracking}
     P -->|already holding| X6[Skip - open position]
-    P -->|not holding| D[LLM devil's advocate<br>review]
-    D -->|GPT challenges BUY| E{Weighted consensus<br>1.2x tech + 1.0x LLM}
-    E -->|score < 0.5| X2[HOLD]
-    E -->|score >= 0.5| RR{Risk/Reward<br>ratio filter}
+    P -->|not holding| RR{Risk/Reward<br>ratio filter}
     RR -->|R:R < 1.5| X5[BUY blocked]
     RR -->|R:R >= 1.5| F{News sentiment<br>filter}
     F -->|earnings soon or<br>negative news| X3[BUY blocked]
@@ -160,9 +158,10 @@ flowchart TD
 ```
 main.py                          # Entry point: orchestrates analysis pipeline
 tools/
-  custom_financial_calc.py       # Technical indicators + scoring engine
-  general.py                     # Consensus logic, decision extraction, action column
-  llms.py                        # GPT and DeepSeek API integration
+  technical_engine.py            # Layered deterministic engine (trend/momentum/risk) + regime classifier — SOLE decider
+  custom_financial_calc.py       # Indicator computation; builds feature vector and delegates to the engine
+  general.py                     # Decision extraction + action column (technical decides, LLM audit veto)
+  llms.py                        # GPT auditor (audit_buy_signal) + legacy GPT/DeepSeek helpers
   risk_management.py             # Stop-loss, position sizing, correlation filter
   backtesting.py                 # Historical signal simulation
   historicals.py                 # Yahoo Finance + Alpha Vantage data fetching
@@ -170,8 +169,10 @@ tools/
   google_handler.py              # Google Drive read/write
   email_handler.py               # Email notifications
   news_sentiment.py              # Finnhub news + earnings + GPT sentiment filter
-test/                            # 93 tests, fully mocked
-resources/                       # CSV data, symbol mappings
+test/                            # Tests, fully mocked
+resources/
+  technical_config.json          # Indicators, weights, regime rules, thresholds (the engine's config)
+  ...                            # CSV data, symbol mappings
 .github/workflows/               # CI (tests) + daily execution
 ```
 
