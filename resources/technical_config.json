@@ -117,10 +117,10 @@
   "decision": {
     "description": "Deterministic decision gated by regime. The technical system is the sole decider.",
     "buy_threshold_note": "The BUY threshold is driven by the MIN_BUY_CONFIDENCE env var (single knob, settable from GitHub Actions). 'buy_threshold_default' below is only the fallback used when that env var is unset.",
-    "buy_threshold_default": 0.6,
+    "buy_threshold_default": 0.5,
     "sell_threshold": -0.35,
     "strong_sell_threshold": -0.6,
-    "max_risk_for_buy": 0.6,
+    "max_risk_for_buy": 0.7,
     "require_regime_for_buy": ["TRENDING_UP"],
     "sell_regimes": ["TRENDING_DOWN", "DISTRIBUTION"],
     "strength_bands": {
@@ -131,7 +131,8 @@
   },
 
   "llm_audit": {
-    "description": "The LLM is invoked ONLY when the technical system outputs BUY. It does NOT re-classify. It may adjust final confidence within bounds and flag incoherence.",
+    "description": "The LLM is invoked ONLY when the technical system outputs BUY and LLM_AUDIT_ENABLED=true. It does NOT re-classify. It may adjust final confidence within bounds and flag incoherence. Recommended: disable (LLM_AUDIT_ENABLED=false) for more consistent signals — the technical engine is already robust.",
+    "enabled_by_env": "LLM_AUDIT_ENABLED (default: true)",
     "enabled_only_on": "BUY",
     "confidence_adjustment_bounds": [-0.3, 0.1],
     "incoherence_downgrades_to": "HOLD"

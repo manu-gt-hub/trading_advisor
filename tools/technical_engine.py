@@ -344,11 +344,30 @@ def decide(features: dict, config: dict = None) -> dict:
 
     strength = _strength_label(abs(risk_adjusted), config)
 
+    # Build decision_reason explaining why signal is not BUY (or confirming BUY)
+    if signal == "BUY":
+        decision_reason = "✓ all conditions met"
+    else:
+        reasons = []
+        if not buy_ok_regime:
+            reasons.append(f"regime={regime} (requires TRENDING_UP)")
+        if risk_adjusted < buy_threshold:
+            reasons.append(f"risk_adjusted={risk_adjusted:.2f} < {buy_threshold}")
+        if risk_score > dcfg["max_risk_for_buy"]:
+            reasons.append(f"risk_score={risk_score:.2f} > {dcfg['max_risk_for_buy']}")
+        if signal == "SELL":
+            if risk_adjusted <= dcfg["strong_sell_threshold"]:
+                reasons.append(f"strong_sell: risk_adjusted={risk_adjusted:.2f} <= {dcfg['strong_sell_threshold']}")
+            elif sell_regime:
+                reasons.append(f"sell_regime={regime}, risk_adjusted={risk_adjusted:.2f} <= {dcfg['sell_threshold']}")
+        decision_reason = " | ".join(reasons) if reasons else "no specific reason"
+
     return {
         "signal": signal,
         "strength": strength,
         "regime": regime,
         "confidence": round(confidence, 4),
+        "decision_reason": decision_reason,
         "sub_scores": {
             "trend_score": round(trend_score, 4),
             "momentum_score": round(momentum_score, 4),

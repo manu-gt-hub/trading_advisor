@@ -30,7 +30,7 @@ jobs:
       GPT_MODEL_NAME: ${{ vars.GPT_MODEL_NAME }}
       TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
       MIN_BUY_CONFIDENCE: ${{ vars.MIN_BUY_CONFIDENCE }}
-      
+      LLM_AUDIT_ENABLED: ${{ vars.LLM_AUDIT_ENABLED }}
 
     steps:
       - name: Checkout repository
