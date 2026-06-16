@@ -590,6 +590,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "strength": result["strength"],
             "regime": result["regime"],
             "confidence": round(confidence, 4),
+            "decision_reason": result["decision_reason"],
             "sub_scores": result["sub_scores"],
             "factors": result["factors"],
             "active_signals": active_signals,

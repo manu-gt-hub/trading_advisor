@@ -68,10 +68,13 @@ def enrich_analysis_df(df, analysis, force_opinion):
             evaluation = metrics["evaluation"]
             confidence = metrics.get("confidence", 0.0)
 
-            # The technical engine is the SOLE decider. The LLM is invoked ONLY when
-            # the technical signal is BUY, and only to AUDIT it (adjust confidence /
+            # The technical engine is the SOLE decider. The LLM is optionally invoked
+            # when the technical signal is BUY, only to AUDIT it (adjust confidence /
             # flag incoherence). It never re-classifies the signal.
-            if evaluation == "BUY":
+            # Set LLM_AUDIT_ENABLED=false to skip the LLM entirely (faster, cheaper).
+            llm_audit_enabled = os.environ.get("LLM_AUDIT_ENABLED", "true").lower() == "true"
+            
+            if evaluation == "BUY" and llm_audit_enabled:
                 technical_result = {
                     "regime": metrics.get("regime"),
                     "strength": metrics.get("strength"),
@@ -85,6 +88,9 @@ def enrich_analysis_df(df, analysis, force_opinion):
                 coherence = "COHERENT" if audit["coherent"] else "INCOHERENT"
                 llm_opinion = f"{coherence} | adj={audit['adjustment']:+.2f} | {audit['reason']}"
                 df.loc[df['symbol'] == symbol, 'llm_confidence'] = round(audit["adjustment"], 4)
+            elif evaluation == "BUY" and not llm_audit_enabled:
+                llm_opinion = "BUY - LLM audit disabled (technical decides)"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
             elif "failed" not in evaluation:
                 llm_opinion = f"{evaluation} - LLM not called (technical decides)"
                 df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
@@ -114,6 +120,9 @@ def enrich_analysis_df(df, analysis, force_opinion):
 
             # Store numeric (audited) confidence for filtering
             df.loc[df['symbol'] == symbol, 'technical_confidence'] = confidence
+
+            # Store decision reason (explains why not BUY, or confirms BUY)
+            df.loc[df['symbol'] == symbol, 'decision_reason'] = metrics.get('decision_reason', '')
 
             # Compute stop-loss and take-profit levels
             atr = metrics['signals'].get('ATR_14')
@@ -235,7 +244,7 @@ def main(show_dataframes=False):
 
     # Risk/Reward filter: block BUYs with bad risk/reward ratio
     if not buy_df.empty and 'risk_reward_ratio' in buy_df.columns:
-        min_rr = 1.5
+        min_rr = 1.2
         bad_rr = buy_df[buy_df['risk_reward_ratio'].apply(
             lambda x: pd.notna(x) and x < min_rr
         )]

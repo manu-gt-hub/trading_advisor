@@ -3,8 +3,10 @@
 ## Principle
 
 > The LLM is **NOT** a second decision system. It is an **auditor**.
+> 
+> **Recommended: disable** (`LLM_AUDIT_ENABLED=false`) for more consistent, deterministic signals.
 
-The technical engine has already decided. The LLM can only do two things, and only when the technical signal is **BUY**:
+The technical engine has already decided. The LLM can only do two things, and only when the technical signal is **BUY** and `LLM_AUDIT_ENABLED=true`:
 
 1. **Detect incoherences** between the structured output (regime, sub-scores) and the raw indicators.
 2. **Adjust the final confidence** within narrow bounds.
@@ -29,16 +31,30 @@ flowchart TD
 
 ## When it is invoked
 
-In `main.py` (`enrich_analysis_df`), only if `evaluation == "BUY"`:
+In `main.py` (`enrich_analysis_df`), only if `evaluation == "BUY"` **and** `LLM_AUDIT_ENABLED=true`:
 
 ```python
-if evaluation == "BUY":
+llm_audit_enabled = os.environ.get("LLM_AUDIT_ENABLED", "true").lower() == "true"
+
+if evaluation == "BUY" and llm_audit_enabled:
     audit = llms.audit_buy_signal(metrics["signals"], symbol, current_price, technical_result)
     confidence = clip(confidence + audit["adjustment"], -1, 1)
     llm_opinion = f"{COHERENT|INCOHERENT} | adj={audit['adjustment']:+.2f} | {audit['reason']}"
 ```
 
-For SELL/HOLD the LLM is **not called** (API cost saving).
+For SELL/HOLD the LLM is **not called** (API cost saving). If `LLM_AUDIT_ENABLED=false`, the LLM is never called.
+
+## Why disable the LLM audit?
+
+| Reason | Explanation |
+|--------|-------------|
+| **Determinism** | The technical engine is already deterministic. The LLM adds variability (same input can produce different outputs). |
+| **False vetoes** | The LLM can flag INCOHERENT on valid setups, blocking good BUYs. |
+| **Cost** | Each audit call costs ~$0.01-0.05 (GPT-4o). |
+| **Latency** | Adds 1-3 seconds per BUY candidate. |
+| **Redundancy** | The technical engine already checks for divergences, overbought, and risk factors. |
+
+**Recommendation**: Set `LLM_AUDIT_ENABLED=false` and trust the technical engine.
 
 ## What the auditor receives — `tools/llms.py`
 

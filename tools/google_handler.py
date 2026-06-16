@@ -90,15 +90,25 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                     sell_date = datetime.today().date()
                     buy_date = pd.to_datetime(row['buy_date']).date()
                     days_diff = (sell_date - buy_date).days
-                    percentage_benefit = ((current_price - buy_value) / buy_value) * 100
+
+                    # Use the actual exit price: take_profit when target hit, stop_loss when stopped out
+                    # This avoids recording a lower price if current_price has moved since the trigger
+                    if stop_hit:
+                        exit_price = float(stop_loss)
+                        logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
+                    else:
+                        # Target hit: use take_profit if available, otherwise target_price
+                        take_profit = row.get('take_profit')
+                        exit_price = float(take_profit) if pd.notna(take_profit) else target_price
+                        logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
+
+                    percentage_benefit = ((exit_price - buy_value) / buy_value) * 100
 
                     # Update the transaction record
-                    df_transactions.at[idx, 'sell_value'] = round(current_price, 2)
+                    df_transactions.at[idx, 'sell_value'] = round(exit_price, 2)
                     df_transactions.at[idx, 'sell_date'] = sell_date
                     df_transactions.at[idx, 'buy_sell_days_diff'] = days_diff
                     df_transactions.at[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
-                    if stop_hit:
-                        logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
         except Exception as e:
             logger.error(f"❌ Error processing transaction row {idx}: {e}. Skipping.")
 

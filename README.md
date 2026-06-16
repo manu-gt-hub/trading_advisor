@@ -6,14 +6,14 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 
 ### Decision Engine
 - **Technical engine decides** — A deterministic, config-driven engine (`technical_engine.py`) produces every BUY/HOLD/SELL signal. No LLM in the classification path.
-- **LLM as auditor only** — GPT is invoked **only when the technical signal is BUY**. It cannot re-classify; it may only (1) flag **INCOHERENT** setups (downgrading BUY→HOLD) and (2) apply a small **bounded confidence adjustment** (`[-0.3, +0.1]`).
+- **LLM as auditor only (optional)** — GPT is invoked **only when the technical signal is BUY** and `LLM_AUDIT_ENABLED=true`. It cannot re-classify; it may only (1) flag **INCOHERENT** setups (downgrading BUY→HOLD) and (2) apply a small **bounded confidence adjustment** (`[-0.3, +0.1]`). **Recommended: disable** (`LLM_AUDIT_ENABLED=false`) for more consistent signals.
 - **Three layers, clear hierarchy** — `trend`, `momentum`, and `risk` are computed independently, normalized to a common scale, and aggregated into explicit **sub-scores** (`trend_score`, `momentum_score`, `risk_score`).
 - **Explicit regime classifier** — `TRENDING_UP`, `TRENDING_DOWN`, `RANGE`, `DISTRIBUTION` based on **SMA(50/200) + ADX** (+DI/-DI). BUY is only allowed in `TRENDING_UP`.
 - **Structured, deterministic output** — `signal + strength + regime + sub_scores`, no narrative text.
 - **Indicators & weights in JSON** — All indicators, weights, regime rules and thresholds live in `resources/technical_config.json`.
 - **Modes** via `FORCE_OPINION`: `DEFAULT` (technical decides, LLM audits BUY), `CUSTOM` (technical only), `LLM1`/`LLM2` (legacy GPT-only override).
-- **MIN_BUY_CONFIDENCE** — Minimum (audited) technical confidence to accept a BUY (0.0-1.0, default 0.6).
-- **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.5 (ATR-based stop-loss vs take-profit).
+- **MIN_BUY_CONFIDENCE** — Minimum technical confidence to accept a BUY (0.0-1.0, default 0.5).
+- **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.2 (ATR-based stop-loss vs take-profit).
 - **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT).
 - **Position tracking** — Skips BUY if symbol already has an open (unsold) position.
 - **Adaptive take-profit** — Uses the more conservative of fixed REVENUE_PERCENTAGE and 3×ATR.
@@ -83,7 +83,8 @@ pip install -r requirements.txt
 | `SYMBOLS_INTEREST_LIST` | Python list of tickers, e.g. `"['AAPL','MSFT']"` |
 | `REVENUE_PERCENTAGE` | Target profit % for take-profit (e.g., `10`) |
 | `FORCE_OPINION` | Decision mode: `DEFAULT`, `LLM1`, `LLM2`, `CUSTOM` |
-| `MIN_BUY_CONFIDENCE` | Single BUY threshold (0.0-1.0, default 0.6): the engine emits BUY only when the risk-adjusted score reaches it, and BUYs are also accepted post-audit against the same value |
+| `MIN_BUY_CONFIDENCE` | Single BUY threshold (0.0-1.0, default 0.5): the engine emits BUY only when the risk-adjusted score reaches it |
+| `LLM_AUDIT_ENABLED` | Enable LLM audit for BUY signals (`true`/`false`, default `true`). **Recommended: `false`** for more consistent, deterministic signals |
 | `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
 | `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
 | `NEWS_SENT_ANALYSIS` | Enable news sentiment filter (`true`/`false`, default `false`) |
