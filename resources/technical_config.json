@@ -1,0 +1,140 @@
+{
+  "version": "2.0",
+  "description": "Layered deterministic technical system. Three independent layers (trend, momentum, risk) are normalized to a common scale and aggregated into sub-scores. The regime classifier (SMA + ADX) gates the final signal. The LLM is NOT a decision layer: it only audits BUY signals.",
+
+  "regime": {
+    "description": "Explicit regime classifier based on SMA(50/200) structure + ADX strength + directional movement (+DI/-DI).",
+    "adx_trend_min": 20.0,
+    "adx_strong": 25.0,
+    "classes": ["TRENDING_UP", "TRENDING_DOWN", "RANGE", "DISTRIBUTION"],
+    "rules": {
+      "RANGE": "ADX < adx_trend_min (no dominant trend, mean-reversion context)",
+      "TRENDING_UP": "ADX >= adx_trend_min AND SMA50 > SMA200 AND price > SMA200 AND +DI > -DI",
+      "TRENDING_DOWN": "ADX >= adx_trend_min AND SMA50 < SMA200 AND price < SMA200 AND -DI > +DI",
+      "DISTRIBUTION": "ADX >= adx_trend_min AND price > SMA200 (bullish structure) BUT -DI > +DI (selling pressure into highs)",
+      "fallback": "RANGE"
+    }
+  },
+
+  "layers": {
+    "trend": {
+      "description": "Directional structure of price. Output normalized to [-1, 1]. Weights are relative: when an indicator is unavailable (e.g. weekly_confirmation with insufficient history) the remaining weights are renormalized automatically.",
+      "layer_weight": 0.55,
+      "indicators": {
+        "sma_cross": {
+          "weight": 0.25,
+          "params": { "fast": 50, "slow": 200 },
+          "norm": "sign of (SMA50 - SMA200) scaled by relative gap via tanh"
+        },
+        "price_vs_sma200": {
+          "weight": 0.15,
+          "params": { "period": 200 },
+          "norm": "tanh of percentage distance of price above/below SMA200"
+        },
+        "price_vs_ema20_sma50": {
+          "weight": 0.15,
+          "params": { "ema": 20, "sma": 50 },
+          "norm": "+1 above both, -1 below both, 0 mixed"
+        },
+        "ma50_slope": {
+          "weight": 0.10,
+          "params": { "lookback": 5 },
+          "norm": "tanh of normalized MA50 slope"
+        },
+        "adx_direction": {
+          "weight": 0.15,
+          "params": { "period": 14 },
+          "norm": "(+DI - -DI)/(+DI + -DI) scaled by min(ADX/40, 1)"
+        },
+        "weekly_confirmation": {
+          "weight": 0.20,
+          "optional": true,
+          "params": { "ma_fast": 10, "ma_slow": 30 },
+          "norm": "0.5*(weekly MA10>MA30 ? +1 : -1) + 0.5*(price>weekly MA10 ? +1 : -1); only applied when weekly history is sufficient"
+        }
+      }
+    },
+
+    "momentum": {
+      "description": "Speed/strength of price move. RSI + MACD are PRIMARY; Stoch RSI + ROC are SECONDARY. Output normalized to [-1, 1].",
+      "layer_weight": 0.45,
+      "indicators": {
+        "rsi": {
+          "tier": "primary",
+          "weight": 0.35,
+          "params": { "period": 14, "neutral": 50, "scale": 20 },
+          "norm": "(RSI - 50) / 20 clipped to [-1, 1]"
+        },
+        "macd": {
+          "tier": "primary",
+          "weight": 0.35,
+          "params": { "fast": 12, "slow": 26, "signal": 9 },
+          "norm": "0.5*sign(MACD-Signal) + 0.25*sign(hist_slope) + 0.25*crossover, clipped"
+        },
+        "stoch_rsi": {
+          "tier": "secondary",
+          "weight": 0.15,
+          "params": { "rsi_period": 14, "stoch_period": 14, "smooth_k": 3, "smooth_d": 3 },
+          "norm": "(K - 50) / 50 clipped to [-1, 1]"
+        },
+        "roc": {
+          "tier": "secondary",
+          "weight": 0.15,
+          "params": { "period": 10, "scale": 10 },
+          "norm": "tanh(ROC * scale)"
+        }
+      }
+    },
+
+    "risk": {
+      "description": "Penalty layer. Output normalized to [0, 1] where 0 = low risk, 1 = high risk. Volume and divergences live HERE, not in momentum.",
+      "penalty_factor": 0.5,
+      "indicators": {
+        "volatility": {
+          "weight": 0.25,
+          "params": { "period": 20, "high_threshold": 0.04 },
+          "norm": "clip(volatility_20 / high_threshold, 0, 1)"
+        },
+        "volume_confirmation": {
+          "weight": 0.25,
+          "params": { "vol_sma": 20 },
+          "norm": "0 when volume confirms move; up to 1 when volume is weak or OBV diverges"
+        },
+        "overbought": {
+          "weight": 0.25,
+          "params": { "rsi_overbought": 70 },
+          "norm": "(RSI - 70)/30 clipped, plus penalty if price at/above upper Bollinger Band"
+        },
+        "divergence": {
+          "weight": 0.25,
+          "params": { "lookback": 14 },
+          "norm": "1.0 when bearish price/OBV or price/RSI divergence detected, else 0"
+        }
+      }
+    }
+  },
+
+  "decision": {
+    "description": "Deterministic decision gated by regime. The technical system is the sole decider.",
+    "buy_threshold_note": "The BUY threshold is driven by the MIN_BUY_CONFIDENCE env var (single knob, settable from GitHub Actions). 'buy_threshold_default' below is only the fallback used when that env var is unset.",
+    "buy_threshold_default": 0.5,
+    "sell_threshold": -0.35,
+    "strong_sell_threshold": -0.6,
+    "max_risk_for_buy": 0.7,
+    "require_regime_for_buy": ["TRENDING_UP"],
+    "sell_regimes": ["TRENDING_DOWN", "DISTRIBUTION"],
+    "strength_bands": {
+      "STRONG": 0.7,
+      "MODERATE": 0.45,
+      "WEAK": 0.0
+    }
+  },
+
+  "llm_audit": {
+    "description": "The LLM is invoked ONLY when the technical system outputs BUY and LLM_AUDIT_ENABLED=true. It does NOT re-classify. It may adjust final confidence within bounds and flag incoherence. Recommended: disable (LLM_AUDIT_ENABLED=false) for more consistent signals — the technical engine is already robust.",
+    "enabled_by_env": "LLM_AUDIT_ENABLED (default: true)",
+    "enabled_only_on": "BUY",
+    "confidence_adjustment_bounds": [-0.3, 0.1],
+    "incoherence_downgrades_to": "HOLD"
+  }
+}

@@ -5,7 +5,6 @@ import os
 import pandas as pd
 import logging
 from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms, news_sentiment
-from tools.general import extract_llm_confidence
 from tools.risk_management import compute_stop_loss_take_profit, filter_correlated_buys
 import numpy as np
 
@@ -66,25 +65,42 @@ def enrich_analysis_df(df, analysis, force_opinion):
         symbol = item["symbol"]
         try:
             metrics = item["metrics"]
+            evaluation = metrics["evaluation"]
+            confidence = metrics.get("confidence", 0.0)
 
-            # Only call LLM for BUY candidates — skip SELL/HOLD/FAILED to save API costs
-            if "failed" not in metrics["evaluation"] and metrics["evaluation"] == "BUY":
-                llm_opinion = llms.get_gpt_signals_analysis(
-                    metrics["signals"], symbol, item["current_price"],
-                    technical_evaluation=metrics["evaluation"],
-                    confidence=metrics["confidence"]
+            # The technical engine is the SOLE decider. The LLM is optionally invoked
+            # when the technical signal is BUY, only to AUDIT it (adjust confidence /
+            # flag incoherence). It never re-classifies the signal.
+            # Set LLM_AUDIT_ENABLED=false to skip the LLM entirely (faster, cheaper).
+            llm_audit_enabled = os.environ.get("LLM_AUDIT_ENABLED", "true").lower() == "true"
+            
+            if evaluation == "BUY" and llm_audit_enabled:
+                technical_result = {
+                    "regime": metrics.get("regime"),
+                    "strength": metrics.get("strength"),
+                    "sub_scores": metrics.get("sub_scores", {}),
+                }
+                audit = llms.audit_buy_signal(
+                    metrics["signals"], symbol, item["current_price"], technical_result
                 )
-            elif "failed" not in metrics["evaluation"]:
-                llm_opinion = f"50% {metrics['evaluation']} - technical signal, LLM skipped"
+                # Apply the bounded confidence adjustment from the auditor
+                confidence = max(-1.0, min(1.0, confidence + audit["adjustment"]))
+                coherence = "COHERENT" if audit["coherent"] else "INCOHERENT"
+                llm_opinion = f"{coherence} | adj={audit['adjustment']:+.2f} | {audit['reason']}"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = round(audit["adjustment"], 4)
+            elif evaluation == "BUY" and not llm_audit_enabled:
+                llm_opinion = "BUY - LLM audit disabled (technical decides)"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
+            elif "failed" not in evaluation:
+                llm_opinion = f"{evaluation} - LLM not called (technical decides)"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
             else:
                 llm_opinion = "error: metrics not provided"
+                df.loc[df['symbol'] == symbol, 'llm_confidence'] = 0.0
 
             general.add_opinion(symbol, df, "llm_opinion", llm_opinion)
 
-            # Store LLM confidence
-            df.loc[df['symbol'] == symbol, 'llm_confidence'] = extract_llm_confidence(llm_opinion)
-
-            # Technical evaluation with key indicators inline
+            # Structured, deterministic technical label (signal + regime + sub-scores)
             sigs = metrics['signals']
             indicator_parts = []
             for key in ['RSI', 'MACD', 'ADX', 'SMA_50', 'SMA_200', 'ATR_14', 'Volatility_20', 'ROC_10', 'Stoch_RSI_K', 'Market_Trend']:
@@ -92,11 +108,21 @@ def enrich_analysis_df(df, analysis, force_opinion):
                     val = sigs[key]
                     indicator_parts.append(f"{key}={round(val, 2) if isinstance(val, float) else val}")
             indicators_str = ', '.join(indicator_parts)
-            custom_label = f"{metrics['confidence']:.2f} {metrics['evaluation']} | {indicators_str}"
+            sub = metrics.get("sub_scores", {})
+            structured = (
+                f"regime={metrics.get('regime', 'UNKNOWN')}, "
+                f"strength={metrics.get('strength', 'UNKNOWN')}, "
+                f"trend={sub.get('trend_score')}, momentum={sub.get('momentum_score')}, "
+                f"risk={sub.get('risk_score')}"
+            )
+            custom_label = f"{confidence:.2f} {evaluation} | {structured} | {indicators_str}"
             general.add_opinion(symbol, df, "manual_financial_analysis", custom_label)
 
-            # Store numeric confidence for filtering
-            df.loc[df['symbol'] == symbol, 'technical_confidence'] = metrics['confidence']
+            # Store numeric (audited) confidence for filtering
+            df.loc[df['symbol'] == symbol, 'technical_confidence'] = confidence
+
+            # Store decision reason (explains why not BUY, or confirms BUY)
+            df.loc[df['symbol'] == symbol, 'decision_reason'] = metrics.get('decision_reason', '')
 
             # Compute stop-loss and take-profit levels
             atr = metrics['signals'].get('ATR_14')
@@ -177,6 +203,11 @@ def main(show_dataframes=False):
     # Enrich analysis_df with opinions
     analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])
 
+    # Ensure news columns always exist in the saved output, even when there are no
+    # BUY candidates (the news filter below only populates them for BUY rows).
+    analysis_df['news_sentiment'] = "Not evaluated (no BUY candidate)"
+    analysis_df['earnings_soon'] = False
+
     # Filter to only BUY recommendations with sufficient confidence
     min_conf = config["min_buy_confidence"]
     buy_df = analysis_df[
@@ -213,7 +244,7 @@ def main(show_dataframes=False):
 
     # Risk/Reward filter: block BUYs with bad risk/reward ratio
     if not buy_df.empty and 'risk_reward_ratio' in buy_df.columns:
-        min_rr = 1.5
+        min_rr = 1.2
         bad_rr = buy_df[buy_df['risk_reward_ratio'].apply(
             lambda x: pd.notna(x) and x < min_rr
         )]

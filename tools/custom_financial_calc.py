@@ -5,6 +5,8 @@ import numpy as np
 import logging
 import yfinance as yf
 
+from tools import technical_engine
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +69,35 @@ def _compute_obv(df):
         else:
             obv.iloc[i] = obv.iloc[i - 1]
     return obv
+
+
+def _detect_bearish_divergence(df, lookback=14):
+    """
+    Detect bearish divergence: price makes a higher high while OBV or RSI makes a
+    lower high. Treated as a RISK factor (not momentum). Returns True/False.
+    """
+    try:
+        if len(df) < 2 * lookback:
+            return False
+        recent = df.tail(lookback)
+        prior = df.iloc[-2 * lookback:-lookback]
+
+        price_higher_high = recent["close"].max() > prior["close"].max()
+        if not price_higher_high:
+            return False
+
+        obv_lower = False
+        if "obv" in df.columns and recent["obv"].notna().any() and prior["obv"].notna().any():
+            obv_lower = recent["obv"].max() < prior["obv"].max()
+
+        rsi_lower = False
+        if "rsi" in df.columns and recent["rsi"].notna().any() and prior["rsi"].notna().any():
+            rsi_lower = recent["rsi"].max() < prior["rsi"].max()
+
+        return bool(obv_lower or rsi_lower)
+    except Exception as e:
+        logger.warning(f"Divergence detection failed: {e}")
+        return False
 
 
 def _compute_fibonacci_levels(df, lookback=50):
@@ -451,357 +482,70 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             signals_dict["Candle_Patterns"] = ", ".join(candle_patterns)
 
         # -------------------------
-        # Determine ADX regime for dynamic weights
+        # NEW: bearish divergence (RISK factor, not momentum)
         # -------------------------
-        adx_value = latest["adx"] if pd.notna(latest["adx"]) else 20
-        strong_trend = adx_value >= 25
-        # In strong trends, trend signals matter more; in ranging markets, mean-reversion matters more
-        trend_multiplier = 1.3 if strong_trend else 0.7
-        reversion_multiplier = 0.7 if strong_trend else 1.3
+        bearish_divergence = _detect_bearish_divergence(df)
 
         # -------------------------
-        # Weighted signal evaluation
+        # MACD fresh crossover detection (+1 bull / -1 bear / 0 none)
         # -------------------------
-        active_signals = []
-        buy_score = 0.0
-        sell_score = 0.0
-
-        # --- ADX TREND STRENGTH ---
-        if pd.notna(latest["adx"]):
-            if strong_trend:
-                active_signals.append(f"📊 Strong trend detected (ADX={adx_value:.1f})")
-                if pd.notna(latest["plus_di"]) and pd.notna(latest["minus_di"]):
-                    if latest["plus_di"] > latest["minus_di"]:
-                        active_signals.append(f"✅ Bullish directional (+DI > -DI)")
-                        buy_score += 1.0
-                    else:
-                        active_signals.append(f"❌ Bearish directional (-DI > +DI)")
-                        sell_score += 1.0
-            else:
-                active_signals.append(f"📊 Weak/ranging market (ADX={adx_value:.1f})")
-
-        # --- TREND (dynamic weight) ---
-        if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
-            if latest["ma50"] > latest["ma200"]:
-                active_signals.append("✅ Bullish trend (MA50 > MA200)")
-                buy_score += 2.0 * trend_multiplier
-            else:
-                active_signals.append("❌ Bearish trend (MA50 < MA200)")
-                sell_score += 2.0 * trend_multiplier
-
-        # Price position relative to key moving averages (dynamic weight)
-        if pd.notna(latest["ma50"]) and pd.notna(latest["ema_20"]):
-            above_ema20 = current_price > latest["ema_20"]
-            above_ma50 = current_price > latest["ma50"]
-            if above_ema20 and above_ma50:
-                active_signals.append(f"✅ Price above EMA20 ({latest['ema_20']:.2f}) and MA50 ({latest['ma50']:.2f})")
-                buy_score += 1.5 * trend_multiplier
-            elif not above_ema20 and not above_ma50:
-                active_signals.append(f"❌ Price below EMA20 ({latest['ema_20']:.2f}) and MA50 ({latest['ma50']:.2f})")
-                sell_score += 1.5 * trend_multiplier
-            else:
-                active_signals.append(f"⚠️ Price between EMA20 and MA50 (mixed)")
-
-        # --- MOMENTUM: RSI ---
-        if pd.notna(latest["rsi"]):
-            rsi = latest["rsi"]
-            if rsi < 30:
-                active_signals.append(f"✅ RSI oversold — reversal opportunity ({rsi:.2f})")
-                buy_score += 1.5 * reversion_multiplier
-            elif 30 <= rsi < 45:
-                active_signals.append(f"⚠️ RSI weak ({rsi:.2f})")
-                sell_score += 0.5
-            elif 45 <= rsi < 55:
-                active_signals.append(f"⚠️ RSI neutral ({rsi:.2f})")
-            elif 55 <= rsi <= 70:
-                active_signals.append(f"✅ RSI strong bullish ({rsi:.2f})")
-                buy_score += 1.5 * trend_multiplier
-            else:
-                active_signals.append(f"❌ RSI overbought ({rsi:.2f})")
-                sell_score += 1.5 * reversion_multiplier
-
-        # --- MOMENTUM: Stochastic RSI ---
-        if pd.notna(latest["stoch_rsi_k"]) and pd.notna(latest["stoch_rsi_d"]):
-            stk = latest["stoch_rsi_k"]
-            std = latest["stoch_rsi_d"]
-            if stk < 20 and std < 20:
-                active_signals.append(f"✅ Stochastic RSI oversold (K={stk:.1f}, D={std:.1f})")
-                buy_score += 1.0 * reversion_multiplier
-            elif stk > 80 and std > 80:
-                active_signals.append(f"❌ Stochastic RSI overbought (K={stk:.1f}, D={std:.1f})")
-                sell_score += 1.0 * reversion_multiplier
-            # Bullish crossover: K crosses above D in oversold zone
-            if stk > std and previous["stoch_rsi_k"] <= previous["stoch_rsi_d"] and stk < 50:
-                active_signals.append(f"✅ Stochastic RSI bullish crossover")
-                buy_score += 0.75
-            # Bearish crossover: K crosses below D in overbought zone
-            elif stk < std and previous["stoch_rsi_k"] >= previous["stoch_rsi_d"] and stk > 50:
-                active_signals.append(f"❌ Stochastic RSI bearish crossover")
-                sell_score += 0.75
-
-        # --- MACD crossover ---
+        macd_cross = 0
         if all(pd.notna([previous["macd"], previous["signal_line"], latest["macd"], latest["signal_line"]])):
             if previous["macd"] < previous["signal_line"] and latest["macd"] > latest["signal_line"]:
-                active_signals.append("✅ MACD bullish crossover")
-                buy_score += 1.5
+                macd_cross = 1
             elif previous["macd"] > previous["signal_line"] and latest["macd"] < latest["signal_line"]:
-                active_signals.append("❌ MACD bearish crossover")
-                sell_score += 1.5
-
-        # MACD histogram momentum
-        if pd.notna(latest["macd_hist_slope"]):
-            if latest["macd_hist_slope"] > 0 and latest["macd_hist"] > 0:
-                active_signals.append(f"✅ MACD histogram rising in positive territory")
-                buy_score += 1.0
-            elif latest["macd_hist_slope"] > 0 and latest["macd_hist"] <= 0:
-                active_signals.append(f"📈 MACD histogram recovering (still negative)")
-                buy_score += 0.5
-            elif latest["macd_hist_slope"] < 0 and latest["macd_hist"] < 0:
-                active_signals.append(f"❌ MACD histogram falling in negative territory")
-                sell_score += 1.0
-            elif latest["macd_hist_slope"] < 0 and latest["macd_hist"] >= 0:
-                active_signals.append(f"📉 MACD histogram weakening (still positive)")
-                sell_score += 0.5
-
-        # --- SHORT-TERM MOMENTUM ---
-        if pd.notna(latest["ma50_slope"]):
-            if latest["ma50_slope"] > 0:
-                active_signals.append("📈 Positive MA50 slope (uptrend momentum)")
-                buy_score += 0.75
-            elif latest["ma50_slope"] < 0:
-                active_signals.append("📉 Negative MA50 slope (downtrend momentum)")
-                sell_score += 0.75
-
-        # ROC_10 momentum
-        if pd.notna(latest["roc_10"]):
-            roc = latest["roc_10"]
-            if roc > 0.05:
-                active_signals.append(f"✅ Strong positive 10-day ROC ({roc:.2%})")
-                buy_score += 1.0
-            elif roc > 0:
-                active_signals.append(f"📈 Mild positive 10-day ROC ({roc:.2%})")
-                buy_score += 0.5
-            elif roc > -0.05:
-                active_signals.append(f"📉 Mild negative 10-day ROC ({roc:.2%})")
-                sell_score += 0.5
-            else:
-                active_signals.append(f"❌ Strong negative 10-day ROC ({roc:.2%})")
-                sell_score += 1.0
-
-        # --- BREAKOUT & VOLUME ---
-        if latest["breakout_20"]:
-            active_signals.append("🚀 20-day breakout")
-            buy_score += 1.0
-            if has_volume and pd.notna(latest.get("vol_sma_20")):
-                if latest["volume"] > 1.5 * latest["vol_sma_20"]:
-                    active_signals.append("🚀 Breakout confirmed by high volume")
-                    buy_score += 0.5
-
-        # --- OBV (On-Balance Volume) ---
-        if has_volume and pd.notna(latest.get("obv")) and pd.notna(latest.get("obv_sma_20")):
-            obv = latest["obv"]
-            obv_sma = latest["obv_sma_20"]
-            if obv > obv_sma:
-                active_signals.append(f"✅ OBV above 20-day average — accumulation (institutional buying)")
-                buy_score += 1.0
-            elif obv < obv_sma:
-                active_signals.append(f"❌ OBV below 20-day average — distribution (institutional selling)")
-                sell_score += 1.0
-
-        # --- BOLLINGER BANDS (dynamic weight based on ADX) ---
-        if pd.notna(latest["bb_lower"]) and pd.notna(latest["bb_upper"]):
-            if current_price <= latest["bb_lower"]:
-                active_signals.append(f"✅ Price at lower Bollinger Band — potential bounce ({latest['bb_lower']:.2f})")
-                buy_score += 0.75 * reversion_multiplier
-            elif current_price >= latest["bb_upper"]:
-                active_signals.append(f"❌ Price at upper Bollinger Band — potential pullback ({latest['bb_upper']:.2f})")
-                sell_score += 0.75 * reversion_multiplier
-
-        # --- FIBONACCI LEVELS ---
-        fib_382 = fib_levels["fib_382"]
-        fib_500 = fib_levels["fib_500"]
-        fib_618 = fib_levels["fib_618"]
-        # Price near key Fibonacci support → potential bounce
-        for level_name, level_val in [("38.2%", fib_382), ("50%", fib_500), ("61.8%", fib_618)]:
-            if abs(current_price - level_val) / level_val < 0.02:  # within 2% of level
-                active_signals.append(f"📐 Price near Fibonacci {level_name} level ({level_val:.2f})")
-                # If price is at support in bullish context, it's a buy signal
-                if pd.notna(latest["ma50"]) and current_price > latest["ma50"]:
-                    buy_score += 0.5
-                else:
-                    sell_score += 0.5
-                break  # only count nearest level
-
-        # --- CANDLESTICK PATTERNS ---
-        bullish_candles = {"HAMMER", "BULLISH_ENGULFING"}
-        bearish_candles = {"SHOOTING_STAR", "BEARISH_ENGULFING"}
-        for p in candle_patterns:
-            if p in bullish_candles:
-                active_signals.append(f"🕯️ Bullish candle pattern: {p}")
-                buy_score += 0.75
-            elif p in bearish_candles:
-                active_signals.append(f"🕯️ Bearish candle pattern: {p}")
-                sell_score += 0.75
-            elif p == "DOJI":
-                active_signals.append(f"🕯️ Doji — indecision candle")
-
-        # --- VOLATILITY FILTER ---
-        if pd.notna(latest["volatility_20"]):
-            vol = latest["volatility_20"]
-            if vol > 0.04:
-                active_signals.append(f"⚠️ High volatility ({vol:.4f}) — elevated risk")
-                sell_score += 0.5
-            elif vol < 0.015:
-                active_signals.append(f"⚠️ Very low volatility ({vol:.4f}) — potential breakout ahead")
-
-        # --- HISTORICAL PROBABILITY ---
-        if monthly_10pct_prob >= 0.15:
-            active_signals.append(f"📊 Historical monthly +10% probability: {monthly_10pct_prob:.1%}")
-            buy_score += 0.5
-        else:
-            active_signals.append(f"⚠️ Low historical monthly +10% probability: {monthly_10pct_prob:.1%}")
-            sell_score += 0.25
-
-        # --- WEEKLY TIMEFRAME CONFIRMATION ---
-        if weekly_conf:
-            w_trend = weekly_conf["weekly_trend_bullish"]
-            w_above = weekly_conf["weekly_price_above_ma10"]
-            w_rsi = weekly_conf["weekly_rsi"]
-
-            if w_trend and w_above:
-                active_signals.append(f"✅ Weekly trend BULLISH (MA10w > MA30w, price above MA10w)")
-                buy_score += 1.5
-            elif not w_trend and not w_above:
-                active_signals.append(f"❌ Weekly trend BEARISH (MA10w < MA30w, price below MA10w)")
-                sell_score += 1.5
-            else:
-                active_signals.append(f"⚠️ Weekly trend mixed (trend={'up' if w_trend else 'down'}, price={'above' if w_above else 'below'} MA10w)")
-
-            if w_rsi < 30:
-                active_signals.append(f"✅ Weekly RSI oversold ({w_rsi:.1f})")
-                buy_score += 0.5
-            elif w_rsi > 70:
-                active_signals.append(f"❌ Weekly RSI overbought ({w_rsi:.1f})")
-                sell_score += 0.5
-
-        # --- MARKET CONTEXT (S&P500) ---
-        if market_trend:
-            if market_trend == "BULLISH":
-                active_signals.append(f"🌍 Market context: S&P500 BULLISH (score={market_score:.1f})")
-                buy_score += 1.0
-            elif market_trend == "BEARISH":
-                active_signals.append(f"🌍 Market context: S&P500 BEARISH (score={market_score:.1f})")
-                sell_score += 1.0
-                # Penalize BUYs in bearish market
-                buy_score *= 0.8
-            else:
-                active_signals.append(f"🌍 Market context: S&P500 NEUTRAL (score={market_score:.1f})")
+                macd_cross = -1
 
         # -------------------------
-        # Signal diversity: count how many categories agree
-        # Categories: trend, momentum, volume, structure (fib/candles), market context
+        # Build the common feature vector consumed by the layered engine.
+        # All raw values; the engine normalizes each to a common scale.
         # -------------------------
-        category_scores = {
-            "trend": 0.0,      # MA50/200, EMA20, MA50 slope, ADX direction, weekly trend
-            "momentum": 0.0,   # RSI, StochRSI, MACD, ROC, MACD hist
-            "volume": 0.0,     # OBV, breakout volume, breakout
-            "structure": 0.0,  # Bollinger, Fibonacci, candles
-            "context": 0.0,    # Market trend, weekly RSI, historical prob, volatility
+        def _f(value, default=np.nan):
+            return float(value) if pd.notna(value) else default
+
+        features = {
+            "price": current_price,
+            # trend layer
+            "sma50": _f(latest["ma50"]),
+            "sma200": _f(latest["ma200"]),
+            "ema20": _f(latest["ema_20"]),
+            "ma50_slope": _f(latest["ma50_slope"]),
+            "adx": _f(latest["adx"]),
+            "plus_di": _f(latest["plus_di"]),
+            "minus_di": _f(latest["minus_di"]),
+            # momentum layer
+            "rsi": _f(latest["rsi"]),
+            "macd": _f(latest["macd"]),
+            "macd_signal": _f(latest["signal_line"]),
+            "macd_hist_slope": _f(latest["macd_hist_slope"]),
+            "macd_cross": macd_cross,
+            "stoch_rsi_k": _f(latest["stoch_rsi_k"]),
+            "roc": _f(latest["roc_10"]),
+            # risk layer
+            "volatility": _f(latest["volatility_20"]),
+            "bb_upper": _f(latest["bb_upper"]),
+            "bearish_divergence": bool(bearish_divergence),
         }
-        # Re-tally scores by category from the signals already computed
-        # Trend signals
-        if pd.notna(latest["ma50"]) and pd.notna(latest["ma200"]):
-            category_scores["trend"] += 1 if latest["ma50"] > latest["ma200"] else -1
-        if pd.notna(latest["ma50"]) and pd.notna(latest["ema_20"]):
-            if current_price > latest["ema_20"] and current_price > latest["ma50"]:
-                category_scores["trend"] += 1
-            elif current_price < latest["ema_20"] and current_price < latest["ma50"]:
-                category_scores["trend"] -= 1
-        if pd.notna(latest["ma50_slope"]):
-            category_scores["trend"] += 1 if latest["ma50_slope"] > 0 else -1
-        if pd.notna(latest["adx"]) and strong_trend and pd.notna(latest["plus_di"]) and pd.notna(latest["minus_di"]):
-            category_scores["trend"] += 1 if latest["plus_di"] > latest["minus_di"] else -1
-        if weekly_conf and weekly_conf["weekly_trend_bullish"] and weekly_conf["weekly_price_above_ma10"]:
-            category_scores["trend"] += 1
-        elif weekly_conf and not weekly_conf["weekly_trend_bullish"] and not weekly_conf["weekly_price_above_ma10"]:
-            category_scores["trend"] -= 1
+        if has_volume:
+            features["volume"] = _f(latest.get("volume"))
+            features["vol_sma_20"] = _f(latest.get("vol_sma_20"))
+            features["obv"] = _f(latest.get("obv"))
+            features["obv_sma_20"] = _f(latest.get("obv_sma_20"))
 
-        # Momentum signals
-        if pd.notna(latest["rsi"]):
-            if latest["rsi"] < 30 or (55 <= latest["rsi"] <= 70):
-                category_scores["momentum"] += 1
-            elif latest["rsi"] > 70 or (30 <= latest["rsi"] < 45):
-                category_scores["momentum"] -= 1
-        if pd.notna(latest["stoch_rsi_k"]) and pd.notna(latest["stoch_rsi_d"]):
-            if latest["stoch_rsi_k"] < 20:
-                category_scores["momentum"] += 1
-            elif latest["stoch_rsi_k"] > 80:
-                category_scores["momentum"] -= 1
-        if pd.notna(latest["macd"]) and pd.notna(latest["signal_line"]):
-            category_scores["momentum"] += 1 if latest["macd"] > latest["signal_line"] else -1
-        if pd.notna(latest["roc_10"]):
-            category_scores["momentum"] += 1 if latest["roc_10"] > 0 else -1
-
-        # Volume signals
-        if has_volume and pd.notna(latest.get("obv")) and pd.notna(latest.get("obv_sma_20")):
-            category_scores["volume"] += 1 if latest["obv"] > latest["obv_sma_20"] else -1
-        if latest["breakout_20"]:
-            category_scores["volume"] += 1
-
-        # Structure signals (Bollinger, Fib, candles)
-        if pd.notna(latest["bb_lower"]) and current_price <= latest["bb_lower"]:
-            category_scores["structure"] += 1
-        elif pd.notna(latest["bb_upper"]) and current_price >= latest["bb_upper"]:
-            category_scores["structure"] -= 1
-        for p in candle_patterns:
-            if p in {"HAMMER", "BULLISH_ENGULFING"}:
-                category_scores["structure"] += 1
-            elif p in {"SHOOTING_STAR", "BEARISH_ENGULFING"}:
-                category_scores["structure"] -= 1
-
-        # Context
-        if market_trend == "BULLISH":
-            category_scores["context"] += 1
-        elif market_trend == "BEARISH":
-            category_scores["context"] -= 1
-
-        # Count how many categories agree with the net direction
-        net_score = buy_score - sell_score
-        net_direction = 1 if net_score > 0 else (-1 if net_score < 0 else 0)
-        categories_agreeing = sum(
-            1 for v in category_scores.values()
-            if (v > 0 and net_direction > 0) or (v < 0 and net_direction < 0)
-        )
-        categories_with_signal = sum(1 for v in category_scores.values() if v != 0)
-        diversity_ratio = categories_agreeing / max(categories_with_signal, 1)
-
-        # -------------------------
-        # Final decision with threshold
-        # -------------------------
-        total_score = buy_score + sell_score
-
-        # MA200 gate: price must be above MA200 for BUY (trend confirmation)
-        below_ma200 = False
-        if pd.notna(latest["ma200"]) and current_price < latest["ma200"]:
-            below_ma200 = True
-
-        if total_score == 0:
-            decision = "HOLD"
-        elif net_score >= 2.5 and not below_ma200:
-            decision = "BUY"
-        elif net_score >= 2.5 and below_ma200:
-            decision = "HOLD"
-            active_signals.append(f"⛔ BUY blocked: price ({current_price:.2f}) below MA200 ({latest['ma200']:.2f})")
-        elif net_score <= -2.5:
-            decision = "SELL"
+        # Weekly (higher timeframe) confirmation feeds the TREND layer when available
+        if weekly_conf:
+            features["weekly_available"] = True
+            features["weekly_trend_bullish"] = bool(weekly_conf["weekly_trend_bullish"])
+            features["weekly_price_above_ma10"] = bool(weekly_conf["weekly_price_above_ma10"])
         else:
-            decision = "HOLD"
+            features["weekly_available"] = False
 
-        # Confidence score normalized to [-1, 1], penalized by low diversity
-        raw_confidence = net_score / max(total_score, 1)
-        # If less than 3 categories agree, reduce confidence (signal is concentrated)
-        diversity_penalty = 1.0 if categories_agreeing >= 3 else (0.85 if categories_agreeing == 2 else 0.7)
-        confidence = raw_confidence * diversity_penalty
+        # -------------------------
+        # Run the deterministic layered engine (sole decision maker)
+        # -------------------------
+        result = technical_engine.decide(features)
+        decision = result["signal"]
+        confidence = result["confidence"]
 
         # -------------------------
         # Convert NumPy types to native float and round
@@ -811,15 +555,44 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             for k, v in signals_dict.items()
         }
 
-        signals_dict["Signal_Diversity"] = f"{categories_agreeing}/{categories_with_signal} categories"
-        signals_dict["Diversity_Penalty"] = round(diversity_penalty, 2)
+        # Structured, deterministic technical output (no narrative)
+        signals_dict["Regime"] = result["regime"]
+        signals_dict["Strength"] = result["strength"]
+        signals_dict["Trend_Score"] = result["sub_scores"]["trend_score"]
+        signals_dict["Momentum_Score"] = result["sub_scores"]["momentum_score"]
+        signals_dict["Risk_Score"] = result["sub_scores"]["risk_score"]
+        signals_dict["Bearish_Divergence"] = bool(bearish_divergence)
 
-        logger.info(f"✅ Successfully evaluated buy interest for {symbol}: decision={decision}, confidence={confidence:.2f}, diversity={categories_agreeing}/{categories_with_signal}, buy={buy_score:.1f}, sell={sell_score:.1f}")
+        # Deterministic, structured factor breakdown (replaces narrative signals)
+        active_signals = [
+            f"signal={result['signal']}",
+            f"strength={result['strength']}",
+            f"regime={result['regime']}",
+            f"trend_score={result['sub_scores']['trend_score']}",
+            f"momentum_score={result['sub_scores']['momentum_score']}",
+            f"risk_score={result['sub_scores']['risk_score']}",
+        ]
+        active_signals += [f"trend.{k}={v}" for k, v in result["factors"]["trend"].items()]
+        active_signals += [f"momentum.{k}={v}" for k, v in result["factors"]["momentum"].items()]
+        active_signals += [f"risk.{k}={v}" for k, v in result["factors"]["risk"].items()]
+
+        logger.info(
+            f"✅ Evaluated {symbol}: signal={decision}, strength={result['strength']}, "
+            f"regime={result['regime']}, trend={result['sub_scores']['trend_score']}, "
+            f"momentum={result['sub_scores']['momentum_score']}, risk={result['sub_scores']['risk_score']}, "
+            f"confidence={confidence:.2f}"
+        )
 
         return {
             "symbol": symbol,
             "evaluation": decision,
-            "confidence": round(confidence, 2),
+            "signal": decision,
+            "strength": result["strength"],
+            "regime": result["regime"],
+            "confidence": round(confidence, 4),
+            "decision_reason": result["decision_reason"],
+            "sub_scores": result["sub_scores"],
+            "factors": result["factors"],
             "active_signals": active_signals,
             "signals": signals_dict
         }

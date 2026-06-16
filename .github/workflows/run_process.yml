@@ -49,4 +49,5 @@ jobs:
           TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
           MIN_BUY_CONFIDENCE: ${{ vars.MIN_BUY_CONFIDENCE }}
           NEWS_SENT_ANALYSIS: ${{ vars.NEWS_SENT_ANALYSIS }}
+          LLM_AUDIT_ENABLED: ${{ vars.LLM_AUDIT_ENABLED }}
         run: python main.py
