@@ -121,6 +121,7 @@
     "sell_threshold": -0.35,
     "strong_sell_threshold": -0.6,
     "max_risk_for_buy": 0.7,
+    "min_momentum_for_buy": 0.2,
     "require_regime_for_buy": ["TRENDING_UP"],
     "sell_regimes": ["TRENDING_DOWN", "DISTRIBUTION"],
     "strength_bands": {

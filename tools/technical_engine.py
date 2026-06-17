@@ -330,10 +330,12 @@ def decide(features: dict, config: dict = None) -> dict:
     buy_ok_regime = regime in dcfg["require_regime_for_buy"]
     sell_regime = regime in dcfg["sell_regimes"]
     buy_threshold = resolve_buy_threshold(config)
+    min_momentum_for_buy = dcfg.get("min_momentum_for_buy", 0.2)
 
     if (buy_ok_regime
             and risk_adjusted >= buy_threshold
-            and risk_score <= dcfg["max_risk_for_buy"]):
+            and risk_score <= dcfg["max_risk_for_buy"]
+            and momentum_score >= min_momentum_for_buy):
         signal = "BUY"
     elif risk_adjusted <= dcfg["strong_sell_threshold"]:
         signal = "SELL"
@@ -355,6 +357,8 @@ def decide(features: dict, config: dict = None) -> dict:
             reasons.append(f"risk_adjusted={risk_adjusted:.2f} < {buy_threshold}")
         if risk_score > dcfg["max_risk_for_buy"]:
             reasons.append(f"risk_score={risk_score:.2f} > {dcfg['max_risk_for_buy']}")
+        if momentum_score < min_momentum_for_buy:
+            reasons.append(f"momentum={momentum_score:.2f} < {min_momentum_for_buy}")
         if signal == "SELL":
             if risk_adjusted <= dcfg["strong_sell_threshold"]:
                 reasons.append(f"strong_sell: risk_adjusted={risk_adjusted:.2f} <= {dcfg['strong_sell_threshold']}")

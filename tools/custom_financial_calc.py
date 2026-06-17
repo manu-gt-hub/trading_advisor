@@ -335,12 +335,12 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         df["ma50"] = df["close"].rolling(window=50).mean()
         df["ma200"] = df["close"].rolling(window=200).mean()
 
-        # RSI (14 días)
+        # RSI (14 días) - Wilder's smoothing (EMA with alpha=1/period)
         delta = df["close"].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
-        avg_gain = gain.rolling(window=14).mean()
-        avg_loss = loss.rolling(window=14).mean()
+        avg_gain = gain.ewm(alpha=1/14, min_periods=14).mean()
+        avg_loss = loss.ewm(alpha=1/14, min_periods=14).mean()
         rs = avg_gain / avg_loss
         df["rsi"] = 100 - (100 / (1 + rs))
         df["rsi"] = df["rsi"].clip(lower=0, upper=100)
