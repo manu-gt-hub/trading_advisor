@@ -141,9 +141,9 @@ def filter_correlated_buys(buy_df, max_correlation=0.75, lookback_days=90):
                         else:
                             loser = sym_b
                         removed.add(loser)
+                        winner = sym_a if loser == sym_b else sym_b
                         logger.info(
-                            f"Diversification filter: removed {loser} (corr={corr:.2f} with "
-                            f"{'sym_a' if loser == sym_b else 'sym_b'})"
+                            f"🚫 Diversification filter: removed {loser} (corr={corr:.2f} with {winner})"
                         )
 
         filtered = buy_df[~buy_df["symbol"].isin(removed)].copy()
