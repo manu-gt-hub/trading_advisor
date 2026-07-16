@@ -251,6 +251,80 @@ def _get_sp500_trend():
         logger.warning(f"Could not fetch S&P500 data: {e}")
         return None, 0.0
 
+
+def _get_valuation_metrics(symbol: str, current_price: float) -> dict:
+    """
+    Fetch fundamental valuation metrics for a symbol using yfinance.
+    Compares current_price vs book_value to determine if stock is over/undervalued.
+    
+    Valuation adjustment logic (based on Price/Book ratio):
+      - P/B < 1.0 (trading below book value): +0.07 bonus (rare opportunity)
+      - P/B < 2.0 (cheap): +0.05 bonus
+      - P/B < 5.0 (reasonable): +0.02 bonus
+      - P/B 5-10: neutral (0)
+      - P/B 10-20: -0.03 penalty (expensive)
+      - P/B > 20: -0.05 penalty (very expensive/speculative)
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        
+        pe_ratio = info.get("trailingPE")
+        forward_pe = info.get("forwardPE")
+        book_value = info.get("bookValue")  # Book value per share
+        market_cap = info.get("marketCap")
+        
+        # Calculate Price to Book directly from current_price and book_value
+        adjustment = 0.0
+        reasons = []
+        price_to_book = None
+        
+        if book_value is not None and book_value > 0 and current_price > 0:
+            price_to_book = current_price / book_value
+            
+            if price_to_book < 1.0:
+                adjustment = 0.07
+                reasons.append(f"P/B={price_to_book:.1f}<1 (below book value!)")
+            elif price_to_book < 2.0:
+                adjustment = 0.05
+                reasons.append(f"P/B={price_to_book:.1f}<2 (cheap)")
+            elif price_to_book < 5.0:
+                adjustment = 0.02
+                reasons.append(f"P/B={price_to_book:.1f}<5 (reasonable)")
+            elif price_to_book < 10.0:
+                adjustment = 0.0
+                reasons.append(f"P/B={price_to_book:.1f} (neutral)")
+            elif price_to_book < 20.0:
+                adjustment = -0.03
+                reasons.append(f"P/B={price_to_book:.1f}>10 (expensive)")
+            else:
+                adjustment = -0.05
+                reasons.append(f"P/B={price_to_book:.1f}>20 (very expensive)")
+        else:
+            reasons.append("no book value available")
+        
+        return {
+            "pe_ratio": round(pe_ratio, 2) if pe_ratio else None,
+            "forward_pe": round(forward_pe, 2) if forward_pe else None,
+            "book_value": round(book_value, 2) if book_value else None,
+            "price_to_book": round(price_to_book, 2) if price_to_book else None,
+            "market_cap": market_cap,
+            "valuation_adjustment": round(adjustment, 4),
+            "valuation_reasons": " | ".join(reasons) if reasons else "no valuation data"
+        }
+    except Exception as e:
+        logger.warning(f"Could not fetch valuation metrics for {symbol}: {e}")
+        return {
+            "pe_ratio": None,
+            "forward_pe": None,
+            "book_value": None,
+            "price_to_book": None,
+            "market_cap": None,
+            "valuation_adjustment": 0.0,
+            "valuation_reasons": f"error: {e}"
+        }
+
+
 def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
     """
     Reviews open transactions and closes those that meet or exceed the required revenue percentage.
@@ -431,6 +505,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         market_trend, market_score = _get_sp500_trend()
 
         # -------------------------
+        # NEW: Fundamental valuation metrics
+        # -------------------------
+        valuation = _get_valuation_metrics(symbol, current_price)
+
+        # -------------------------
         # Extract latest and previous
         # -------------------------
         latest = df.iloc[-1]
@@ -466,6 +545,12 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "Fib_500": fib_levels["fib_500"],
             "Fib_618": fib_levels["fib_618"],
             "Market_Trend": market_trend or "UNKNOWN",
+            # Valuation metrics (Price vs Book Value)
+            "Book_Value": valuation["book_value"],
+            "Price_to_Book": valuation["price_to_book"],
+            "PE_Ratio": valuation["pe_ratio"],
+            "Valuation_Adjustment": valuation["valuation_adjustment"],
+            "Valuation_Reasons": valuation["valuation_reasons"],
         }
         if weekly_conf:
             signals_dict["Weekly_Trend_Bullish"] = weekly_conf["weekly_trend_bullish"]
@@ -548,6 +633,18 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         confidence = result["confidence"]
 
         # -------------------------
+        # Apply valuation adjustment to confidence (bonus/penalty)
+        # -------------------------
+        valuation_adj = valuation["valuation_adjustment"]
+        confidence_before_valuation = confidence
+        confidence = max(-1.0, min(1.0, confidence + valuation_adj))
+        if valuation_adj != 0:
+            logger.info(
+                f"📊 Valuation adjustment for {symbol}: {valuation_adj:+.2f} "
+                f"(confidence {confidence_before_valuation:.2f} → {confidence:.2f}) | {valuation['valuation_reasons']}"
+            )
+
+        # -------------------------
         # Convert NumPy types to native float and round
         # -------------------------
         signals_dict = {
@@ -575,6 +672,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         active_signals += [f"trend.{k}={v}" for k, v in result["factors"]["trend"].items()]
         active_signals += [f"momentum.{k}={v}" for k, v in result["factors"]["momentum"].items()]
         active_signals += [f"risk.{k}={v}" for k, v in result["factors"]["risk"].items()]
+        active_signals.append(f"valuation_adj={valuation_adj}")
 
         logger.info(
             f"✅ Evaluated {symbol}: signal={decision}, strength={result['strength']}, "
@@ -590,6 +688,8 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "strength": result["strength"],
             "regime": result["regime"],
             "confidence": round(confidence, 4),
+            "confidence_before_valuation": round(confidence_before_valuation, 4),
+            "valuation_adjustment": valuation_adj,
             "decision_reason": result["decision_reason"],
             "sub_scores": result["sub_scores"],
             "factors": result["factors"],
