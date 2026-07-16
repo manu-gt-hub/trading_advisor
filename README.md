@@ -27,6 +27,13 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 - **Regime classifier**: SMA + ADX → `TRENDING_UP` / `TRENDING_DOWN` / `RANGE` / `DISTRIBUTION`.
 - **Aggregation**: `directional = w_trend·trend_score + w_momentum·momentum_score`, then risk-penalized; regime gates the final signal.
 - **Supporting indicators** (reported but not in the core score): Bollinger Bands, ATR 14, Fibonacci retracements, candlestick patterns, weekly confirmation, S&P500 context.
+- **Valuation adjustment**: Compares `current_price` vs `book_value` (Price/Book ratio) and applies a confidence bonus/penalty:
+  - P/B < 1: **+0.07** (below book value — rare opportunity)
+  - P/B < 2: **+0.05** (cheap)
+  - P/B < 5: **+0.02** (reasonable)
+  - P/B 5-10: neutral
+  - P/B 10-20: **-0.03** (expensive)
+  - P/B > 20: **-0.05** (very expensive/speculative)
 
 ### Risk Management (`risk_management.py`)
 - **Stop-loss**: ATR-based (2x ATR below entry)
@@ -100,7 +107,7 @@ pip install -r requirements.txt
 
 | Sheet | Columns |
 |---|---|
-| **Analysis** | symbol, current_price, llm_opinion, llm_confidence, manual_financial_analysis, technical_confidence, stop_loss, take_profit, risk_reward_ratio, action |
+| **Analysis** | symbol, current_price, llm_opinion, llm_confidence, manual_financial_analysis, technical_confidence, stop_loss, take_profit, risk_reward_ratio, action, Book_Value, Price_to_Book, Valuation_Adjustment, Valuation_Reasons |
 | **Buy Recommendations** | Same + buy_date, tradingview_url |
 
 ## 🧪 Tests
