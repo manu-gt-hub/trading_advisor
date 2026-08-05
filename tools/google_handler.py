@@ -76,7 +76,21 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
     if revenue_percentage is None:
         logger.warning("⚠️ revenue_percentage is None. Skipping transaction review.")
         return df_transactions
-    
+
+    # Ensure columns we are going to write can accept mixed types
+    # (Google Sheets may export empty cells as strings, giving the column a string dtype).
+    for col in ['sell_value', 'sell_date', 'buy_sell_days_diff', 'percentage_benefit']:
+        if col in df_transactions.columns:
+            df_transactions[col] = df_transactions[col].astype(object)
+
+    # Coerce numeric columns to floats/ints for reliable comparisons and math
+    df_transactions['buy_value'] = pd.to_numeric(df_transactions['buy_value'], errors='coerce')
+    if 'stop_loss' in df_transactions.columns:
+        df_transactions['stop_loss'] = pd.to_numeric(df_transactions['stop_loss'], errors='coerce')
+    if 'take_profit' in df_transactions.columns:
+        df_transactions['take_profit'] = pd.to_numeric(df_transactions['take_profit'], errors='coerce')
+    df_transactions['buy_date'] = pd.to_datetime(df_transactions['buy_date'], errors='coerce')
+
     # Loop through each row in the transactions dataframe
     for idx, row in df_transactions.iterrows():
         try:
