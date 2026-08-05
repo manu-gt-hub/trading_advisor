@@ -4,6 +4,7 @@ import argparse
 import os
 import pandas as pd
 import logging
+from datetime import datetime
 from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms, news_sentiment
 from tools.risk_management import compute_stop_loss_take_profit, filter_correlated_buys
 import numpy as np
@@ -281,8 +282,8 @@ def main(show_dataframes=False):
 
         if blocked_symbols:
             buy_df = buy_df[~buy_df['symbol'].isin(blocked_symbols)].copy()
-    buy_df['buy_date'] = now_madrid
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
+    buy_df['buy_date'] = datetime.today().strftime('%Y-%m-%d')
     buy_date_col = buy_df.pop('buy_date')
     buy_df.insert(2, 'buy_date', buy_date_col)
 

@@ -112,3 +112,36 @@ def test_update_transactions():
     assert pd.isna(amd_row['buy_sell_days_diff']), "AMD days diff should not be updated"
     assert pd.isna(amd_row['percentage_benefit']), "AMD percentage_benefit should not be updated"
 
+
+def test_update_transactions_repairs_partially_closed_row():
+    """
+    Regression test: a row with sell_value set but missing sell_date,
+    buy_sell_days_diff and percentage_benefit should be repaired.
+    """
+    today = datetime.today().date()
+    buy_date = today - timedelta(days=30)
+
+    df_analysis = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'current_price': [166.0],
+    })
+
+    # Row was partially saved: sell_value exists, but metadata is missing
+    df_transactions = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'buy_value': [150.0],
+        'buy_date': [buy_date],
+        'sell_value': [165.0],
+        'sell_date': [None],
+        'buy_sell_days_diff': [None],
+        'percentage_benefit': [None],
+    })
+
+    updated_df = google_handler.update_transactions(df_analysis, df_transactions, 10)
+
+    aapl_row = updated_df[updated_df['symbol'] == 'AAPL'].iloc[0]
+    assert aapl_row['sell_value'] == 165.0, "sell_value should be preserved"
+    assert aapl_row['sell_date'] == today.isoformat(), "sell_date should be repaired"
+    assert aapl_row['buy_sell_days_diff'] == 30, "days diff should be repaired"
+    assert round(aapl_row['percentage_benefit'], 2) == 10.0, "percentage benefit should be repaired"
+

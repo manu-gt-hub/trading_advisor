@@ -2,7 +2,7 @@ import sys
 import os
 import pandas as pd
 import pytest
-from datetime import date
+from datetime import date, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -147,3 +147,49 @@ class TestMarketDayGuard:
 
     def test_regular_friday_is_market_day(self):
         assert _is_market_day(date(2025, 5, 23)) is True  # Friday
+
+
+def test_transaction_update_and_buy_df_concat_preserves_sell_columns():
+    """
+    Regression test for the bug where sell_value was saved but sell_date,
+    buy_sell_days_diff and percentage_benefit were missing after pd.concat
+    and sort_values mixed date types (datetime.date vs string) in buy_date.
+    """
+    buy_date = date.today() - timedelta(days=30)
+    sell_date = date.today()
+    days_diff = (sell_date - buy_date).days
+
+    # Simulate a closed transaction row returned by google_handler.update_transactions
+    trans_updated_df = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'buy_value': [150.0],
+        'buy_date': [buy_date.isoformat()],
+        'sell_value': [165.0],
+        'sell_date': [sell_date.isoformat()],
+        'buy_sell_days_diff': [days_diff],
+        'percentage_benefit': [10.0],
+    })
+
+    # Simulate a new BUY candidate with buy_date as ISO string (matching main.py)
+    buy_df = pd.DataFrame({
+        'symbol': ['NVDA'],
+        'buy_value': [450.0],
+        'action': ['BUY'],
+        'technical_confidence': [0.55],
+        'buy_date': [date.today().isoformat()],
+    })
+
+    # Replicate main.py concat + sort + head
+    final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
+                 .sort_values(by='buy_date', ascending=False)\
+                 .head(100)
+
+    aapl = final_df[final_df['symbol'] == 'AAPL'].iloc[0]
+    assert aapl['sell_value'] == 165.0
+    assert aapl['sell_date'] == sell_date.isoformat()
+    assert aapl['buy_sell_days_diff'] == days_diff
+    assert aapl['percentage_benefit'] == 10.0
+
+    nvda = final_df[final_df['symbol'] == 'NVDA'].iloc[0]
+    assert pd.isna(nvda['sell_value'])
+    assert pd.isna(nvda['sell_date'])

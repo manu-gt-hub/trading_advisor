@@ -70,14 +70,39 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
         try:
             symbol = row['symbol']
             buy_value = row['buy_value']
-            
-            # Skip if already sold
-            if pd.notna(row.get('sell_value')):
+            sell_value = row.get('sell_value')
+            sell_date = row.get('sell_date')
+            buy_sell_days_diff = row.get('buy_sell_days_diff')
+            percentage_benefit = row.get('percentage_benefit')
+
+            # Defensive repair: row has a sell price but is missing sell metadata.
+            # This can happen if a previous run failed mid-write or after a partial save.
+            if pd.notna(sell_value) and pd.isna(sell_date):
+                logger.warning(f"⚠️ Repairing incomplete sale record for {symbol} (sell_value={sell_value:.2f})")
+                exit_price = float(sell_value)
+                buy_date_raw = pd.to_datetime(row['buy_date'], errors='coerce')
+                if pd.isna(buy_date_raw):
+                    logger.error(f"❌ Cannot repair {symbol}: invalid buy_date '{row['buy_date']}'")
+                    continue
+                sell_date_obj = datetime.today().date()
+                days_diff = (sell_date_obj - buy_date_raw.date()).days
+                pct = ((exit_price - buy_value) / buy_value) * 100
+                df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
+                df_transactions.at[idx, 'buy_sell_days_diff'] = int(days_diff)
+                df_transactions.at[idx, 'percentage_benefit'] = round(pct, 2)
+                logger.info(
+                    f"✅ Repaired {symbol}: buy={buy_value:.2f}, sell={exit_price:.2f}, "
+                    f"days={days_diff}, benefit={pct:.2f}%, date={sell_date_obj.isoformat()}"
+                )
                 continue
-            
+
+            # Skip fully closed rows
+            if pd.notna(sell_value):
+                continue
+
             # Look for the symbol in the analysis dataframe
             analysis_row = df_analysis[df_analysis['symbol'] == symbol]
-            
+
             if not analysis_row.empty:
                 current_price = analysis_row.iloc[0]['current_price']
                 target_price = buy_value * (1 + float(revenue_percentage) / 100)
@@ -87,9 +112,14 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 stop_hit = pd.notna(stop_loss) and current_price <= stop_loss
 
                 if current_price >= target_price or stop_hit:
-                    sell_date = datetime.today().date()
-                    buy_date = pd.to_datetime(row['buy_date']).date()
-                    days_diff = (sell_date - buy_date).days
+                    # Normalize all dates to ISO strings so they sort/serialize consistently
+                    sell_date_obj = datetime.today().date()
+                    buy_date_raw = pd.to_datetime(row['buy_date'], errors='coerce')
+                    if pd.isna(buy_date_raw):
+                        logger.error(f"❌ Cannot compute days held for {symbol}: invalid buy_date '{row['buy_date']}'. Skipping sale.")
+                        continue
+                    buy_date = buy_date_raw.date()
+                    days_diff = (sell_date_obj - buy_date).days
 
                     # Use the actual exit price: take_profit when target hit, stop_loss when stopped out
                     # This avoids recording a lower price if current_price has moved since the trigger
@@ -102,13 +132,17 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                         exit_price = float(take_profit) if pd.notna(take_profit) else target_price
                         logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
 
-                    percentage_benefit = ((exit_price - buy_value) / buy_value) * 100
+                    pct = ((exit_price - buy_value) / buy_value) * 100
 
-                    # Update the transaction record
+                    # Update the transaction record (store dates as ISO strings for consistency)
                     df_transactions.at[idx, 'sell_value'] = round(exit_price, 2)
-                    df_transactions.at[idx, 'sell_date'] = sell_date
-                    df_transactions.at[idx, 'buy_sell_days_diff'] = days_diff
-                    df_transactions.at[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
+                    df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
+                    df_transactions.at[idx, 'buy_sell_days_diff'] = int(days_diff)
+                    df_transactions.at[idx, 'percentage_benefit'] = round(pct, 2)
+                    logger.info(
+                        f"✅ Closed {symbol}: buy={buy_value:.2f}, sell={exit_price:.2f}, "
+                        f"days={days_diff}, benefit={pct:.2f}%, date={sell_date_obj.isoformat()}"
+                    )
         except Exception as e:
             logger.error(f"❌ Error processing transaction row {idx}: {e}. Skipping.")
 
