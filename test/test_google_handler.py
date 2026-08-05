@@ -145,3 +145,35 @@ def test_update_transactions_repairs_partially_closed_row():
     assert aapl_row['buy_sell_days_diff'] == 30, "days diff should be repaired"
     assert round(aapl_row['percentage_benefit'], 2) == 10.0, "percentage benefit should be repaired"
 
+
+def test_update_transactions_repairs_blank_string_sell_date():
+    """
+    Regression test: Google Sheets sometimes exports missing cells as empty strings
+    instead of NaN. The repair path must handle that.
+    """
+    today = datetime.today().date()
+    buy_date = today - timedelta(days=10)
+
+    df_analysis = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'current_price': [160.0],
+    })
+
+    df_transactions = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'buy_value': [150.0],
+        'buy_date': [buy_date],
+        'sell_value': [165.0],
+        'sell_date': [''],  # Blank string from Google Sheets
+        'buy_sell_days_diff': [''],
+        'percentage_benefit': [''],
+    })
+
+    updated_df = google_handler.update_transactions(df_analysis, df_transactions, 10)
+
+    aapl_row = updated_df[updated_df['symbol'] == 'AAPL'].iloc[0]
+    assert aapl_row['sell_value'] == 165.0
+    assert aapl_row['sell_date'] == today.isoformat()
+    assert aapl_row['buy_sell_days_diff'] == 10
+    assert round(aapl_row['percentage_benefit'], 2) == 10.0
+

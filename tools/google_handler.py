@@ -6,11 +6,23 @@ from datetime import datetime, timezone, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
-from datetime import datetime
 import logging
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+def _is_missing(value):
+    """Return True for NaN, None, empty/whitespace strings or literal 'NaT'/'nan'/'None'."""
+    if value is None:
+        return True
+    if isinstance(value, float) and pd.isna(value):
+        return True
+    if isinstance(value, str):
+        return value.strip() == "" or value.strip().lower() in {"nat", "nan", "none", "null"}
+    try:
+        return pd.isna(value)
+    except Exception:
+        return False
 
 # Load .env file only if not running in production (e.g., GitHub Actions)
 if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
@@ -70,18 +82,27 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
         try:
             symbol = row['symbol']
             buy_value = row['buy_value']
-            sell_value = row.get('sell_value')
+            sell_value_raw = row.get('sell_value')
             sell_date = row.get('sell_date')
             buy_sell_days_diff = row.get('buy_sell_days_diff')
             percentage_benefit = row.get('percentage_benefit')
 
+            # Coerce sell_value to a float; invalid/non-numeric values are treated as missing.
+            sell_value = pd.to_numeric(sell_value_raw, errors='coerce')
+
+            logger.debug(
+                f"Row {idx} {symbol}: sell_value={sell_value_raw} (coerced={sell_value}), "
+                f"sell_date={sell_date!r}, missing={_is_missing(sell_date)}"
+            )
+
             # Defensive repair: row has a sell price but is missing sell metadata.
-            # This can happen if a previous run failed mid-write or after a partial save.
-            if pd.notna(sell_value) and pd.isna(sell_date):
+            # This can happen if a previous run failed mid-write or after a partial save,
+            # or if Google Sheets exported an empty string instead of NaN.
+            if not _is_missing(sell_value) and _is_missing(sell_date):
                 logger.warning(f"⚠️ Repairing incomplete sale record for {symbol} (sell_value={sell_value:.2f})")
                 exit_price = float(sell_value)
                 buy_date_raw = pd.to_datetime(row['buy_date'], errors='coerce')
-                if pd.isna(buy_date_raw):
+                if _is_missing(buy_date_raw):
                     logger.error(f"❌ Cannot repair {symbol}: invalid buy_date '{row['buy_date']}'")
                     continue
                 sell_date_obj = datetime.today().date()
@@ -97,7 +118,7 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 continue
 
             # Skip fully closed rows
-            if pd.notna(sell_value):
+            if not _is_missing(sell_value):
                 continue
 
             # Look for the symbol in the analysis dataframe
