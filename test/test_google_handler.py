@@ -101,7 +101,7 @@ def test_update_transactions():
     # Validate AAPL was updated (165 >= 150 * 1.1 = 165)
     aapl_row = updated_df[updated_df['symbol'] == 'AAPL'].iloc[0]
     assert aapl_row['sell_value'] == 165.0, "AAPL sell_value should be updated"
-    assert aapl_row['sell_date'] == today, "AAPL sell_date should be today"
+    assert aapl_row['sell_date'] == today.isoformat(), "AAPL sell_date should be today"
     assert aapl_row['buy_sell_days_diff'] == 10, "AAPL days diff should be 10"
     assert round(aapl_row['percentage_benefit'], 2) == 10.0, "AAPL should have 10% benefit"
 
