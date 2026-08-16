@@ -89,8 +89,6 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
         df_transactions['stop_loss'] = pd.to_numeric(df_transactions['stop_loss'], errors='coerce')
     if 'take_profit' in df_transactions.columns:
         df_transactions['take_profit'] = pd.to_numeric(df_transactions['take_profit'], errors='coerce')
-    df_transactions['buy_date'] = pd.to_datetime(df_transactions['buy_date'], errors='coerce')
-
     # Loop through each row in the transactions dataframe
     for idx, row in df_transactions.iterrows():
         try:

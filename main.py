@@ -148,12 +148,17 @@ def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
 
         trans_updated_df = google_handler.update_transactions(update_df, transactions_df, config["revenue_percentage"])
 
-        final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)
+        # Only keep transaction-relevant columns from buy_df to avoid
+        # leaking analysis columns (llm_opinion, filter_status, etc.) into log_transactions
+        tx_cols = ['symbol', 'buy_value', 'buy_date', 'stop_loss', 'take_profit', 'risk_reward_ratio', 'tradingview_url']
+        buy_for_tx = buy_df[[c for c in tx_cols if c in buy_df.columns]].copy()
+
+        final_df = pd.concat([trans_updated_df, buy_for_tx], ignore_index=True)
 
         # Normalize buy_date to strings before sorting to avoid
         # TypeError when transactions have datetime64 and buy_df has strings
         if 'buy_date' in final_df.columns:
-            final_df['buy_date'] = final_df['buy_date'].astype(str)
+            final_df['buy_date'] = final_df['buy_date'].astype(str).replace('NaT', '')
 
         final_df = final_df.sort_values(by='buy_date', ascending=False).head(config["max_records"])
 

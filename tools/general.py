@@ -199,8 +199,8 @@ def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Original DataFrame with 'action' column added.
     """
-    # Clean force_opinion input
-    opinion_type = opinion_type.strip().upper()
+    # Clean force_opinion input (default to empty string when env var is unset)
+    opinion_type = (opinion_type or "").strip().upper()
     logger.debug(f"Opinion type: {opinion_type}")
 
     if opinion_type == "LLM1":

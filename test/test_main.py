@@ -16,7 +16,7 @@ def filter_buys_by_confidence(analysis_df, min_confidence):
     return buy_df
 
 
-def filter_buys_by_risk_reward(buy_df, min_rr=1.5):
+def filter_buys_by_risk_reward(buy_df, min_rr=1.2):
     """Replicates the R:R filtering logic from main.py for testability."""
     if buy_df.empty or 'risk_reward_ratio' not in buy_df.columns:
         return buy_df
