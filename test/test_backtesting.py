@@ -7,11 +7,42 @@ from unittest.mock import patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
 from tools.backtesting import run_backtest, format_backtest_report
 
+HISTORICALS_DIR = os.path.join(os.path.dirname(__file__), '..', 'resources', 'historicals')
+
+# Map symbol -> csv filename for all available historical data
+SYMBOL_CSV_MAP = {
+    "MSFT": "msft_hist_data.csv",
+    "AAPL": "apple_hist_data.csv",
+    "NVDA": "nvidia_hist_data.csv",
+    "META": "meta_hist_data.csv",
+    "KO": "ko_hist_data.csv",
+    "V": "visa_hist_data.csv",
+    "AMZN": "amzn_hist_data.csv",
+}
+
+
+def load_symbol_data(symbol):
+    csv_path = os.path.join(HISTORICALS_DIR, SYMBOL_CSV_MAP[symbol])
+    return pd.read_csv(csv_path)
+
 
 def load_msft_data():
-    current_dir = os.path.dirname(__file__)
-    csv_path = os.path.join(current_dir, '..', 'resources', 'historicals', 'msft_hist_data.csv')
-    return pd.read_csv(csv_path)
+    return load_symbol_data("MSFT")
+
+
+# Symbols with enough rows (>=300) for meaningful backtesting
+def _symbols_with_enough_data(min_rows=300):
+    valid = []
+    for sym, fname in SYMBOL_CSV_MAP.items():
+        path = os.path.join(HISTORICALS_DIR, fname)
+        if os.path.exists(path):
+            df = pd.read_csv(path)
+            if len(df) >= min_rows:
+                valid.append(sym)
+    return valid
+
+
+BACKTEST_SYMBOLS = _symbols_with_enough_data()
 
 
 @patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
@@ -146,6 +177,8 @@ def test_format_backtest_report_with_trades():
         "total_buy_signals": 5,
         "wins": 3,
         "losses": 2,
+        "filtered_by_confidence": 2,
+        "min_buy_confidence": 0.35,
         "win_rate": 0.6,
         "avg_max_return_pct": 12.5,
         "avg_actual_return_pct": 7.3,
@@ -164,3 +197,61 @@ def test_format_backtest_report_with_trades():
     assert "TEST" in report
     assert "Buy & Hold" in report
     assert "System vs B&H" in report
+    assert "0.35" in report
+
+
+# ─── Multi-symbol parametrized tests ──────────────────────────────────
+
+
+@pytest.mark.parametrize("symbol", _symbols_with_enough_data())
+@patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
+@patch("tools.custom_financial_calc._get_sp500_trend", return_value=("NEUTRAL", 0.0))
+def test_backtest_multi_symbol(mock_sp500, mock_weekly, symbol):
+    """Run backtest across all available symbols with sufficient data."""
+    df = load_symbol_data(symbol)
+
+    results = run_backtest(
+        df, symbol,
+        target_profit_pct=10.0,
+        max_holding_days=30,
+        min_history=250,
+        step_days=20,
+    )
+
+    print("\n" + format_backtest_report(results))
+
+    assert results["symbol"] == symbol
+    assert results["total_buy_signals"] >= 0
+    assert isinstance(results["trades"], list)
+
+    if results["total_buy_signals"] > 0:
+        assert results["avg_actual_return_pct"] > -15.0, (
+            f"{symbol}: avg return {results['avg_actual_return_pct']:.2f}% is catastrophic"
+        )
+
+
+@pytest.mark.parametrize("symbol", _symbols_with_enough_data())
+@patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
+@patch("tools.custom_financial_calc._get_sp500_trend", return_value=("NEUTRAL", 0.0))
+def test_backtest_confidence_filter_reduces_trades(mock_sp500, mock_weekly, symbol):
+    """Applying min_buy_confidence should produce fewer or equal BUY signals."""
+    df = load_symbol_data(symbol)
+    common = dict(target_profit_pct=10.0, max_holding_days=30, min_history=250, step_days=20)
+
+    results_no_filter = run_backtest(df, symbol, **common)
+    results_filtered = run_backtest(df, symbol, min_buy_confidence=0.35, **common)
+
+    no_filter_buys = results_no_filter["total_buy_signals"]
+    filtered_buys = results_filtered["total_buy_signals"]
+    filtered_out = results_filtered.get("filtered_by_confidence", 0)
+
+    print(f"\n{symbol}: no filter={no_filter_buys}, filtered={filtered_buys}, rejected={filtered_out}")
+
+    # filtered should be <= unfiltered
+    assert filtered_buys <= no_filter_buys, (
+        f"{symbol}: confidence filter produced MORE trades ({filtered_buys} > {no_filter_buys})"
+    )
+    # The sum of accepted + rejected should equal unfiltered
+    assert filtered_buys + filtered_out == no_filter_buys, (
+        f"{symbol}: {filtered_buys} + {filtered_out} != {no_filter_buys}"
+    )

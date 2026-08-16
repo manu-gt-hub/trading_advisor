@@ -7,7 +7,8 @@ logger = logging.getLogger(__name__)
 
 
 def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
-                 min_history=250, step_days=5, sp500_mock=("NEUTRAL", 0.0)):
+                 min_history=250, step_days=5, sp500_mock=("NEUTRAL", 0.0),
+                 min_buy_confidence=None):
     """
     Backtest the technical analysis signals over historical data.
 
@@ -23,6 +24,8 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         min_history (int): Minimum rows of history before starting to evaluate.
         step_days (int): Evaluate every N days to speed up backtesting.
         sp500_mock (tuple): Mock S&P500 trend to avoid external calls (trend, score).
+        min_buy_confidence (float, optional): Minimum confidence to accept a BUY signal.
+            Mirrors the MIN_BUY_CONFIDENCE filter used in production. If None, all BUYs pass.
 
     Returns:
         dict with backtest results including trades, win rate, avg return, etc.
@@ -43,6 +46,7 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
 
     trades = []
     total_signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "EVALUATION_FAILED": 0}
+    filtered_by_confidence = 0
 
     for i in range(min_history, len(df) - max_holding_days, step_days):
         # Use only data up to day i (look-ahead bias prevention)
@@ -61,6 +65,11 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         total_signals[decision] = total_signals.get(decision, 0) + 1
 
         if decision != "BUY":
+            continue
+
+        # Apply min_buy_confidence filter (mirrors production)
+        if min_buy_confidence is not None and confidence < min_buy_confidence:
+            filtered_by_confidence += 1
             continue
 
         # Track the BUY trade outcome
@@ -133,6 +142,8 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             "symbol": symbol,
             "total_signals": total_signals,
             "total_buy_signals": 0,
+            "filtered_by_confidence": filtered_by_confidence,
+            "min_buy_confidence": min_buy_confidence,
             "trades": [],
             "benchmark_buy_hold_pct": round(bh_return_pct, 2),
             "summary": "No BUY signals generated during backtest period.",
@@ -157,6 +168,8 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         "total_buy_signals": total,
         "wins": int(wins),
         "losses": total - int(wins),
+        "filtered_by_confidence": filtered_by_confidence,
+        "min_buy_confidence": min_buy_confidence,
         "win_rate": round(win_rate, 4),
         "avg_max_return_pct": round(trades_df["max_return_pct"].mean(), 2),
         "avg_actual_return_pct": round(trades_df["actual_return_pct"].mean(), 2),
@@ -176,15 +189,19 @@ def format_backtest_report(results):
     if results["total_buy_signals"] == 0:
         return f"Backtest {results['symbol']}: No BUY signals generated."
 
+    min_conf = results.get('min_buy_confidence')
+    filtered = results.get('filtered_by_confidence', 0)
+
     lines = [
         f"═══════════════════════════════════════════",
         f"  BACKTEST REPORT: {results['symbol']}",
         f"═══════════════════════════════════════════",
         f"  Target profit:     {results['target_profit_pct']}%",
         f"  Max holding:       {results['max_holding_days']} trading days",
+        f"  Min confidence:    {min_conf if min_conf is not None else 'OFF'}",
         f"───────────────────────────────────────────",
         f"  Signal distribution: {results['total_signals']}",
-        f"  BUY signals:       {results['total_buy_signals']}",
+        f"  BUY signals:       {results['total_buy_signals']}" + (f" ({filtered} filtered by confidence)" if filtered else ""),
         f"  Wins (hit target): {results['wins']}",
         f"  Losses:            {results['losses']}",
         f"  WIN RATE:          {results['win_rate']:.1%}",
