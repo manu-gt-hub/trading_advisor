@@ -148,12 +148,19 @@ def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
 
         trans_updated_df = google_handler.update_transactions(update_df, transactions_df, config["revenue_percentage"])
 
-        final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)\
-                     .sort_values(by='buy_date', ascending=False).head(config["max_records"])
+        final_df = pd.concat([trans_updated_df, buy_df], ignore_index=True)
 
+        # Normalize buy_date to strings before sorting to avoid
+        # TypeError when transactions have datetime64 and buy_df has strings
+        if 'buy_date' in final_df.columns:
+            final_df['buy_date'] = final_df['buy_date'].astype(str)
+
+        final_df = final_df.sort_values(by='buy_date', ascending=False).head(config["max_records"])
+
+        logger.info(f"📝 Saving {len(final_df)} transactions (including {len(buy_df)} new buys)")
         google_handler.save_dataframe_file_id(final_df, config["transactions_file_id"])
     except Exception as e:
-        logger.error(f"❌ Failed to update/save transactions: {e}")
+        logger.error(f"❌ Failed to update/save transactions: {e}", exc_info=True)
 
 def save_outputs(buy_df, analysis_df, config):
     logger = logging.getLogger(__name__)
@@ -211,28 +218,30 @@ def main(show_dataframes=False):
 
     # Filter to only BUY recommendations with sufficient confidence
     min_conf = config["min_buy_confidence"]
-    buy_df = analysis_df[
-        (analysis_df['action'] == 'BUY') &
-        (analysis_df['technical_confidence'] >= min_conf)
+    all_buys = analysis_df[analysis_df['action'] == 'BUY'].copy()
+    config['logger'].info(f"📊 Stocks with action=BUY: {list(all_buys['symbol'])} ({len(all_buys)} total)")
+
+    buy_df = all_buys[
+        all_buys['technical_confidence'] >= min_conf
     ].copy()
 
     # Log filtered-out low-confidence BUYs
-    low_conf_buys = analysis_df[
-        (analysis_df['action'] == 'BUY') &
-        (analysis_df['technical_confidence'] < min_conf)
-    ]
+    low_conf_buys = all_buys[all_buys['technical_confidence'] < min_conf]
     for _, row in low_conf_buys.iterrows():
         config['logger'].info(
-            f"Filtered out BUY for {row['symbol']}: confidence {row['technical_confidence']:.2f} < {min_conf}"
+            f"🚫 Confidence filter: {row['symbol']} confidence {row['technical_confidence']:.2f} < {min_conf}"
         )
+    config['logger'].info(f"📊 After confidence filter (>= {min_conf}): {list(buy_df['symbol'])}")
 
     # Position tracking: skip BUY if already holding an open position
     if not buy_df.empty:
         try:
             transactions_df = google_handler.load_data(config["transactions_file_id"])
             if transactions_df is not None and not transactions_df.empty:
+                # Handle blank strings from Google Sheets: coerce sell_value to numeric
+                sell_values = pd.to_numeric(transactions_df['sell_value'], errors='coerce')
                 open_positions = transactions_df[
-                    transactions_df['sell_value'].isna()
+                    sell_values.isna()
                 ]['symbol'].tolist()
                 already_held = buy_df[buy_df['symbol'].isin(open_positions)]
                 for _, row in already_held.iterrows():
@@ -240,6 +249,7 @@ def main(show_dataframes=False):
                         f"🚫 Position filter: skipping BUY for {row['symbol']} — already holding open position"
                     )
                 buy_df = buy_df[~buy_df['symbol'].isin(open_positions)].copy()
+                config['logger'].info(f"📊 After position filter: {list(buy_df['symbol'])}")
         except Exception as e:
             config['logger'].warning(f"⚠️ Position tracking check failed: {e}. Continuing without filter.")
 
@@ -255,6 +265,7 @@ def main(show_dataframes=False):
                 f"ratio {row['risk_reward_ratio']:.2f} < {min_rr}"
             )
         buy_df = buy_df[~buy_df.index.isin(bad_rr.index)].copy()
+        config['logger'].info(f"📊 After R:R filter (>= {min_rr}): {list(buy_df['symbol'])}")
 
     # News sentiment filter: block BUYs with upcoming earnings or strongly negative news
     if not buy_df.empty:
@@ -282,6 +293,7 @@ def main(show_dataframes=False):
 
         if blocked_symbols:
             buy_df = buy_df[~buy_df['symbol'].isin(blocked_symbols)].copy()
+        config['logger'].info(f"📊 After news filter: {list(buy_df['symbol'])}")
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
     buy_df['buy_date'] = datetime.today().strftime('%Y-%m-%d')
     buy_date_col = buy_df.pop('buy_date')
@@ -292,6 +304,8 @@ def main(show_dataframes=False):
     # Diversification filter: remove highly correlated BUYs
     if len(buy_df) >= 2:
         buy_df = filter_correlated_buys(buy_df, max_correlation=0.75)
+
+    config['logger'].info(f"📊 Final BUY list: {list(buy_df['symbol'])} ({len(buy_df)} stocks)")
 
     # Update and save all outputs
     update_and_save_transactions(config, analysis_df, buy_df, now_madrid)
