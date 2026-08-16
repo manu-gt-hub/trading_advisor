@@ -30,8 +30,8 @@ def load_msft_data():
     return load_symbol_data("MSFT")
 
 
-# Symbols with enough rows (>=300) for meaningful backtesting
-def _symbols_with_enough_data(min_rows=300):
+# Symbols with enough rows (>=90) for meaningful backtesting (~3 months of data)
+def _symbols_with_enough_data(min_rows=90):
     valid = []
     for sym, fname in SYMBOL_CSV_MAP.items():
         path = os.path.join(HISTORICALS_DIR, fname)
@@ -210,11 +210,15 @@ def test_backtest_multi_symbol(mock_sp500, mock_weekly, symbol):
     """Run backtest across all available symbols with sufficient data."""
     df = load_symbol_data(symbol)
 
+    # Use lower min_history for shorter datasets (e.g. AMZN ~252 rows)
+    rows = len(df)
+    min_hist = min(200, rows - 31)  # ensure at least 31 rows for future trades
+
     results = run_backtest(
         df, symbol,
         target_profit_pct=10.0,
         max_holding_days=30,
-        min_history=250,
+        min_history=min_hist,
         step_days=20,
     )
 
@@ -236,7 +240,9 @@ def test_backtest_multi_symbol(mock_sp500, mock_weekly, symbol):
 def test_backtest_confidence_filter_reduces_trades(mock_sp500, mock_weekly, symbol):
     """Applying min_buy_confidence should produce fewer or equal BUY signals."""
     df = load_symbol_data(symbol)
-    common = dict(target_profit_pct=10.0, max_holding_days=30, min_history=250, step_days=20)
+    rows = len(df)
+    min_hist = min(200, rows - 31)
+    common = dict(target_profit_pct=10.0, max_holding_days=30, min_history=min_hist, step_days=20)
 
     results_no_filter = run_backtest(df, symbol, **common)
     results_filtered = run_backtest(df, symbol, min_buy_confidence=0.35, **common)
