@@ -216,6 +216,9 @@ def main(show_dataframes=False):
     analysis_df['news_sentiment'] = "Not evaluated (no BUY candidate)"
     analysis_df['earnings_soon'] = False
 
+    # Initialize filter_status column for all rows
+    analysis_df['filter_status'] = ''
+
     # Filter to only BUY recommendations with sufficient confidence
     min_conf = config["min_buy_confidence"]
     all_buys = analysis_df[analysis_df['action'] == 'BUY'].copy()
@@ -228,9 +231,9 @@ def main(show_dataframes=False):
     # Log filtered-out low-confidence BUYs
     low_conf_buys = all_buys[all_buys['technical_confidence'] < min_conf]
     for _, row in low_conf_buys.iterrows():
-        config['logger'].info(
-            f"🚫 Confidence filter: {row['symbol']} confidence {row['technical_confidence']:.2f} < {min_conf}"
-        )
+        reason = f"🚫 confidence {row['technical_confidence']:.2f} < {min_conf}"
+        analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'filter_status'] = reason
+        config['logger'].info(f"🚫 Confidence filter: {row['symbol']} {reason}")
     config['logger'].info(f"📊 After confidence filter (>= {min_conf}): {list(buy_df['symbol'])}")
 
     # Position tracking: skip BUY if already holding an open position
@@ -245,9 +248,9 @@ def main(show_dataframes=False):
                 ]['symbol'].tolist()
                 already_held = buy_df[buy_df['symbol'].isin(open_positions)]
                 for _, row in already_held.iterrows():
-                    config['logger'].info(
-                        f"🚫 Position filter: skipping BUY for {row['symbol']} — already holding open position"
-                    )
+                    reason = "🚫 already holding open position"
+                    analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'filter_status'] = reason
+                    config['logger'].info(f"🚫 Position filter: {row['symbol']} — {reason}")
                 buy_df = buy_df[~buy_df['symbol'].isin(open_positions)].copy()
                 config['logger'].info(f"📊 After position filter: {list(buy_df['symbol'])}")
         except Exception as e:
@@ -260,10 +263,9 @@ def main(show_dataframes=False):
             lambda x: pd.notna(x) and x < min_rr
         )]
         for _, row in bad_rr.iterrows():
-            config['logger'].info(
-                f"🚫 R:R filter blocked BUY for {row['symbol']}: "
-                f"ratio {row['risk_reward_ratio']:.2f} < {min_rr}"
-            )
+            reason = f"🚫 R:R {row['risk_reward_ratio']:.2f} < {min_rr}"
+            analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'filter_status'] = reason
+            config['logger'].info(f"🚫 R:R filter: {row['symbol']} — {reason}")
         buy_df = buy_df[~buy_df.index.isin(bad_rr.index)].copy()
         config['logger'].info(f"📊 After R:R filter (>= {min_rr}): {list(buy_df['symbol'])}")
 
@@ -285,9 +287,9 @@ def main(show_dataframes=False):
                 )
                 if news_result['block_buy']:
                     blocked_symbols.append(row['symbol'])
-                    config['logger'].info(
-                        f"🚫 News filter blocked BUY for {row['symbol']}: {news_result['reason']}"
-                    )
+                    reason = f"🚫 news: {news_result['reason']}"
+                    analysis_df.loc[analysis_df['symbol'] == row['symbol'], 'filter_status'] = reason
+                    config['logger'].info(f"🚫 News filter: {row['symbol']} — {reason}")
             except Exception as e:
                 config['logger'].error(f"❌ News filter failed for {row['symbol']}: {e}. Keeping BUY.")
 
@@ -303,7 +305,16 @@ def main(show_dataframes=False):
 
     # Diversification filter: remove highly correlated BUYs
     if len(buy_df) >= 2:
+        pre_corr_symbols = set(buy_df['symbol'])
         buy_df = filter_correlated_buys(buy_df, max_correlation=0.75)
+        removed_by_corr = pre_corr_symbols - set(buy_df['symbol'])
+        for sym in removed_by_corr:
+            analysis_df.loc[analysis_df['symbol'] == sym, 'filter_status'] = '🚫 correlated with another BUY'
+
+    # Mark surviving BUYs as passed
+    surviving_symbols = set(buy_df['symbol'])
+    for sym in surviving_symbols:
+        analysis_df.loc[analysis_df['symbol'] == sym, 'filter_status'] = '✅ passed all filters'
 
     config['logger'].info(f"📊 Final BUY list: {list(buy_df['symbol'])} ({len(buy_df)} stocks)")
 
