@@ -82,6 +82,21 @@
           "weight": 0.15,
           "params": { "period": 10, "scale": 10 },
           "norm": "tanh(ROC * scale)"
+        },
+        "candlestick": {
+          "weight": 0.05,
+          "optional": true,
+          "norm": "+1 for bullish patterns (HAMMER, ENGULFING), -1 for bearish; only added when a pattern is detected"
+        },
+        "bb_squeeze": {
+          "weight": 0.05,
+          "optional": true,
+          "norm": "Bollinger bandwidth < 80% of its SMA -> squeeze (breakout energy); only added during squeeze"
+        },
+        "fib_support": {
+          "weight": 0.05,
+          "optional": true,
+          "norm": "Price in Fibonacci golden zone (38.2%-61.8% retracement); 0.6 near 61.8%, 0.3 near 38.2%"
         }
       }
     },
@@ -109,6 +124,11 @@
           "weight": 0.25,
           "params": { "lookback": 14 },
           "norm": "1.0 when bearish price/OBV or price/RSI divergence detected, else 0"
+        },
+        "market_context": {
+          "weight": 0.10,
+          "optional": true,
+          "norm": "S&P500 trend as risk: bearish market = 1.0 (high risk), bullish = 0.0 (low risk); only when SP500 data available"
         }
       }
     }

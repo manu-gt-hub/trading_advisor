@@ -220,6 +220,32 @@ def compute_momentum_score(features: dict, config: dict = None):
     roc_scale = ind["roc"]["params"]["scale"]
     factors["roc"] = _clip(_tanh(roc * roc_scale), -1.0, 1.0)
 
+    # Candlestick patterns (optional, only when a pattern is detected)
+    candle_bull = features.get("candle_bullish", False)
+    candle_bear = features.get("candle_bearish", False)
+    if candle_bull or candle_bear:
+        factors["candlestick"] = 1.0 if candle_bull else -1.0
+
+    # Bollinger squeeze (optional, only added during squeeze)
+    bb_bw = _safe(features.get("bb_bandwidth"))
+    bb_bw_sma = _safe(features.get("bb_bandwidth_sma"))
+    if bb_bw > 0 and bb_bw_sma > 0 and bb_bw < bb_bw_sma * 0.8:
+        squeeze_strength = _clip(1.0 - (bb_bw / bb_bw_sma), 0.0, 1.0)
+        factors["bb_squeeze"] = squeeze_strength
+
+    # Fibonacci golden zone support (optional, only when price is in the zone)
+    fib_618 = _safe(features.get("fib_618"))
+    fib_500 = _safe(features.get("fib_500"))
+    fib_382 = _safe(features.get("fib_382"))
+    price = _safe(features.get("price"))
+    if fib_618 > 0 and fib_382 > fib_618 and price > 0:
+        if fib_618 <= price <= fib_500:
+            # Deep pullback near 61.8% support → bullish bounce zone
+            factors["fib_support"] = 0.6
+        elif fib_500 < price <= fib_382:
+            # Mild pullback zone → mildly bullish
+            factors["fib_support"] = 0.3
+
     score = _weighted_average(factors, ind)
     return _clip(score, -1.0, 1.0), factors
 
@@ -267,6 +293,13 @@ def compute_risk_score(features: dict, config: dict = None):
 
     # Divergence risk (bearish price/OBV or price/RSI divergence)
     factors["divergence"] = 1.0 if features.get("bearish_divergence") else 0.0
+
+    # Market context: S&P500 trend (optional, only when data available)
+    market_score_val = features.get("market_score")
+    if market_score_val is not None:
+        # market_score ranges from -2 (very bearish) to +2 (very bullish)
+        # Convert to risk: bearish = high risk (1.0), bullish = low risk (0.0)
+        factors["market_context"] = _clip((1.0 - _safe(market_score_val)) / 2.0, 0.0, 1.0)
 
     score = _weighted_average(factors, ind)
     return _clip(score, 0.0, 1.0), factors

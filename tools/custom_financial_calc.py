@@ -459,6 +459,10 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         df["bb_upper"] = df["bb_mid"] + 2 * df["bb_std"]
         df["bb_lower"] = df["bb_mid"] - 2 * df["bb_std"]
 
+        # Bollinger Bandwidth (for squeeze detection)
+        df["bb_bandwidth"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"].replace(0, np.nan)
+        df["bb_bandwidth_sma"] = df["bb_bandwidth"].rolling(20).mean()
+
         # -------------------------
         # NEW: ADX (trend strength)
         # -------------------------
@@ -606,11 +610,22 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
             "macd_cross": macd_cross,
             "stoch_rsi_k": _f(latest["stoch_rsi_k"]),
             "roc": _f(latest["roc_10"]),
+            # momentum layer: new optional factors
+            "bb_bandwidth": _f(latest.get("bb_bandwidth")),
+            "bb_bandwidth_sma": _f(latest.get("bb_bandwidth_sma")),
+            "candle_bullish": any(p in ("HAMMER", "BULLISH_ENGULFING") for p in candle_patterns),
+            "candle_bearish": any(p in ("SHOOTING_STAR", "BEARISH_ENGULFING") for p in candle_patterns),
+            "fib_382": fib_levels["fib_382"],
+            "fib_500": fib_levels["fib_500"],
+            "fib_618": fib_levels["fib_618"],
             # risk layer
             "volatility": _f(latest["volatility_20"]),
             "bb_upper": _f(latest["bb_upper"]),
             "bearish_divergence": bool(bearish_divergence),
         }
+        # S&P500 market context (risk layer, only when data available)
+        if market_trend is not None:
+            features["market_score"] = market_score
         if has_volume:
             features["volume"] = _f(latest.get("volume"))
             features["vol_sma_20"] = _f(latest.get("vol_sma_20"))
