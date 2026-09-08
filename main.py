@@ -162,6 +162,16 @@ def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
 
         final_df = final_df.sort_values(by='buy_date', ascending=False).head(config["max_records"])
 
+        # Enforce consistent column order so sell columns appear right after buy columns
+        desired_order = [
+            'symbol', 'buy_value', 'buy_date', 'sell_value', 'sell_date',
+            'buy_sell_days_diff', 'percentage_benefit', 'stop_loss', 'take_profit',
+            'risk_reward_ratio', 'tradingview_url',
+        ]
+        ordered_cols = [c for c in desired_order if c in final_df.columns]
+        extra_cols = [c for c in final_df.columns if c not in desired_order]
+        final_df = final_df[ordered_cols + extra_cols]
+
         logger.info(f"📝 Saving {len(final_df)} transactions (including {len(buy_df)} new buys)")
         google_handler.save_dataframe_file_id(final_df, config["transactions_file_id"])
     except Exception as e:
@@ -302,7 +312,7 @@ def main(show_dataframes=False):
             buy_df = buy_df[~buy_df['symbol'].isin(blocked_symbols)].copy()
         config['logger'].info(f"📊 After news filter: {list(buy_df['symbol'])}")
     buy_df = buy_df.rename(columns={'current_price': 'buy_value'})
-    buy_df['buy_date'] = datetime.today().strftime('%Y-%m-%d')
+    buy_df['buy_date'] = now_madrid
     buy_date_col = buy_df.pop('buy_date')
     buy_df.insert(2, 'buy_date', buy_date_col)
 
