@@ -2,7 +2,7 @@ import sys
 import os
 import pandas as pd
 import pytest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -176,7 +176,7 @@ def test_transaction_update_and_buy_df_concat_preserves_sell_columns():
         'buy_value': [450.0],
         'action': ['BUY'],
         'technical_confidence': [0.55],
-        'buy_date': [date.today().isoformat()],
+        'buy_date': [datetime.today().strftime('%Y-%m-%d %H:%M')],
     })
 
     # Replicate main.py concat + sort + head
