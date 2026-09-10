@@ -146,6 +146,47 @@ def test_update_transactions_repairs_partially_closed_row():
     assert round(aapl_row['percentage_benefit'], 2) == 10.0, "percentage benefit should be repaired"
 
 
+def test_update_transactions_respects_revenue_percentage_over_take_profit():
+    """
+    Regression test: when take_profit (ATR-based) is lower than the revenue
+    target, the sell must record target_price as exit price so that
+    revenue_percentage is respected.
+    Example: buy=100, revenue_percentage=10 → target=110, but take_profit=106
+    (ATR was small). The sell triggers at current_price=111 (>=110) and must
+    record exit_price=110 (10%), not 106 (6%).
+    """
+    today = datetime.today().date()
+    buy_date = today - timedelta(days=15)
+
+    df_analysis = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'current_price': [111.0],  # above target (110) → triggers sell
+    })
+
+    df_transactions = pd.DataFrame({
+        'symbol': ['AAPL'],
+        'buy_value': [100.0],
+        'buy_date': [buy_date],
+        'sell_value': [None],
+        'sell_date': [None],
+        'buy_sell_days_diff': [None],
+        'percentage_benefit': [None],
+        'stop_loss': [96.0],
+        'take_profit': [106.0],  # ATR-based, lower than target (110)
+    })
+
+    updated_df = google_handler.update_transactions(df_analysis, df_transactions, 10)
+
+    aapl_row = updated_df[updated_df['symbol'] == 'AAPL'].iloc[0]
+    # exit_price must be target_price (110), not take_profit (106)
+    assert aapl_row['sell_value'] == 110.0, (
+        f"sell_value should be target_price=110.0, got {aapl_row['sell_value']}"
+    )
+    assert round(aapl_row['percentage_benefit'], 2) == 10.0, (
+        f"percentage_benefit should be 10.0%, got {aapl_row['percentage_benefit']}"
+    )
+
+
 def test_update_transactions_repairs_blank_string_sell_date():
     """
     Regression test: Google Sheets sometimes exports missing cells as empty strings

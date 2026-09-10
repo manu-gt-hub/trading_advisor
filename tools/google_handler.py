@@ -154,15 +154,13 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                     buy_date = buy_date_raw.date()
                     days_diff = (sell_date_obj - buy_date).days
 
-                    # Use the actual exit price: take_profit when target hit, stop_loss when stopped out
-                    # This avoids recording a lower price if current_price has moved since the trigger
+                    # Use the actual exit price: target_price when target hit, stop_loss when stopped out
                     if stop_hit:
                         exit_price = float(stop_loss)
                         logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
                     else:
-                        # Target hit: use take_profit if available, otherwise target_price
-                        take_profit = row.get('take_profit')
-                        exit_price = float(take_profit) if pd.notna(take_profit) else target_price
+                        # Target hit: use target_price to respect revenue_percentage
+                        exit_price = target_price
                         logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
 
                     pct = ((exit_price - buy_value) / buy_value) * 100
