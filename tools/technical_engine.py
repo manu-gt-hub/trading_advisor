@@ -101,6 +101,11 @@ def classify_regime(features: dict, config: dict = None) -> str:
     if adx < adx_trend_min:
         return "RANGE"
 
+    # Guard: if SMA200 or price is missing/zero, we cannot determine
+    # structure reliably — fall back to RANGE to avoid false BUY signals.
+    if sma200 == 0.0 or price == 0.0:
+        return "RANGE"
+
     bullish_structure = sma50 > sma200 and price > sma200
     bearish_structure = sma50 < sma200 and price < sma200
     directional_up = plus_di > minus_di
@@ -269,10 +274,19 @@ def compute_risk_score(features: dict, config: dict = None):
     factors["volatility"] = _clip(volatility / vol_high, 0.0, 1.0) if vol_high else 0.0
 
     # Volume confirmation risk
+    # Normalize NaN to None so the unknown-volume fallback triggers correctly
     volume = features.get("volume")
+    if volume is not None and (isinstance(volume, float) and math.isnan(volume)):
+        volume = None
     vol_sma = features.get("vol_sma_20")
+    if vol_sma is not None and (isinstance(vol_sma, float) and math.isnan(vol_sma)):
+        vol_sma = None
     obv = features.get("obv")
+    if obv is not None and (isinstance(obv, float) and math.isnan(obv)):
+        obv = None
     obv_sma = features.get("obv_sma_20")
+    if obv_sma is not None and (isinstance(obv_sma, float) and math.isnan(obv_sma)):
+        obv_sma = None
     vol_risk = 0.0
     if volume is not None and vol_sma is not None and _safe(vol_sma) > 0:
         if _safe(volume) < _safe(vol_sma):

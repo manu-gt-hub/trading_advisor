@@ -20,9 +20,13 @@ def _compute_adx(df, period=14):
     minus_dm = -low.diff()
     plus_dm[plus_dm < 0] = 0
     minus_dm[minus_dm < 0] = 0
-    # When both are positive, keep only the larger
-    plus_dm[(plus_dm > 0) & (minus_dm > 0) & (plus_dm <= minus_dm)] = 0
-    minus_dm[(plus_dm > 0) & (minus_dm > 0) & (minus_dm < plus_dm)] = 0
+    # When both are positive, keep only the larger; zero both if equal (Wilder's rule).
+    # Compute masks BEFORE mutating to avoid sequential bias.
+    both_positive = (plus_dm > 0) & (minus_dm > 0)
+    mask_zero_plus = both_positive & (plus_dm <= minus_dm)
+    mask_zero_minus = both_positive & (minus_dm <= plus_dm)
+    plus_dm[mask_zero_plus] = 0
+    minus_dm[mask_zero_minus] = 0
 
     tr1 = high - low
     tr2 = (high - close.shift(1)).abs()
@@ -32,7 +36,10 @@ def _compute_adx(df, period=14):
     atr = tr.ewm(alpha=1 / period, min_periods=period).mean()
     plus_di = 100 * (plus_dm.ewm(alpha=1 / period, min_periods=period).mean() / atr)
     minus_di = 100 * (minus_dm.ewm(alpha=1 / period, min_periods=period).mean() / atr)
-    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    # Guard division by zero when both DI are zero
+    di_sum = plus_di + minus_di
+    di_sum = di_sum.replace(0, np.nan)
+    dx = 100 * ((plus_di - minus_di).abs() / di_sum)
     adx = dx.ewm(alpha=1 / period, min_periods=period).mean()
 
     return adx, plus_di, minus_di
@@ -383,7 +390,7 @@ def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, 
     return pd.DataFrame(updated_rows)
 
 
-def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -> dict:
+def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, sp500_override=None) -> dict:
     """
     Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators,
     historical volatility, monthly returns, breakouts, and momentum.
@@ -506,7 +513,10 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         # -------------------------
         # NEW: S&P500 market context
         # -------------------------
-        market_trend, market_score = _get_sp500_trend()
+        if sp500_override is not None:
+            market_trend, market_score = sp500_override
+        else:
+            market_trend, market_score = _get_sp500_trend()
 
         # -------------------------
         # NEW: Fundamental valuation metrics
@@ -717,7 +727,15 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float) -
         return {
             "symbol": symbol,
             "evaluation": "EVALUATION_FAILED",
-            "confidence": 0.0,  # <--- agregado
+            "signal": "HOLD",
+            "strength": "WEAK",
+            "regime": "UNKNOWN",
+            "confidence": 0.0,
+            "confidence_before_valuation": 0.0,
+            "valuation_adjustment": 0.0,
+            "decision_reason": f"evaluation error: {e}",
+            "sub_scores": {"trend_score": 0.0, "momentum_score": 0.0, "risk_score": 0.0},
+            "factors": {"trend": {}, "momentum": {}, "risk": {}},
             "active_signals": ["Evaluation failed due to error."],
             "signals": {"error": str(e)}
         }
