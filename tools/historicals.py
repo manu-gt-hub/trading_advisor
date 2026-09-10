@@ -39,7 +39,8 @@ def get_symbol_history_from_alpha(symbol: str, days: int):
     }
 
     try:
-        response = requests.get(ALPHA_URL, params=params, verify=False)
+        ssl_verify = os.getenv("DISABLE_SSL_VERIFY", "").lower() not in ("1", "true", "yes")
+        response = requests.get(ALPHA_URL, params=params, verify=ssl_verify, timeout=(30, 60))
         response.raise_for_status()
         data = response.json()
 

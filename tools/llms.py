@@ -8,6 +8,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Timeout for LLM HTTP calls (seconds): connect, read
+_LLM_TIMEOUT = (30, 120)
+
+def _ssl_verify():
+    """Return SSL verify setting: True by default, False if DISABLE_SSL_VERIFY is set."""
+    return os.getenv("DISABLE_SSL_VERIFY", "").lower() not in ("1", "true", "yes")
+
 system_prompt = (
     "You are a critical risk reviewer for short-term stock trades (1-4 weeks). "
     "You challenge BUY recommendations by looking for hidden risks, but you also recognize genuinely strong setups. "
@@ -112,7 +119,7 @@ def audit_buy_signal(signals, symbol, current_price, technical_result):
     try:
         client = OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
-            http_client=httpx.Client(verify=False),
+            http_client=httpx.Client(verify=_ssl_verify(), timeout=_LLM_TIMEOUT),
         )
         response = client.chat.completions.create(
             model=model_name,
@@ -127,7 +134,9 @@ def audit_buy_signal(signals, symbol, current_price, technical_result):
         return parse_audit_response(raw, bounds)
     except Exception as e:
         logger.error(f"LLM audit failed for {symbol}: {e}")
-        return {"coherent": True, "adjustment": 0.0, "reason": f"audit error: {e}", "raw": ""}
+        # Fail conservative: flag incoherent and apply max negative adjustment
+        # so a broken LLM never green-lights a risky trade
+        return {"coherent": False, "adjustment": bounds[0], "reason": f"audit error: {e}", "raw": ""}
 
 def generate_prompt(metrics, current_price, technical_evaluation=None, confidence=None):
     revenue_percentage = os.getenv('REVENUE_PERCENTAGE') 
@@ -212,7 +221,8 @@ def get_deepseek_signals_analysis(signals, symbol, current_price, technical_eval
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=_LLM_TIMEOUT,
+                                 verify=_ssl_verify())
         response.raise_for_status()  # Will raise HTTPError for bad responses (4xx or 5xx)
 
         result = response.json()
@@ -249,7 +259,7 @@ def get_gpt_signals_analysis(signals, symbol, current_price, technical_evaluatio
     try:
         client = OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
-            http_client=httpx.Client(verify=False)
+            http_client=httpx.Client(verify=_ssl_verify(), timeout=_LLM_TIMEOUT),
         )
         llm_temperature = 0
 

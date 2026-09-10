@@ -47,15 +47,23 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
     trades = []
     total_signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "EVALUATION_FAILED": 0}
     filtered_by_confidence = 0
+    # Track the end index of the last open trade to prevent overlapping positions.
+    # A new trade can only start after the previous one has exited.
+    last_trade_exit_idx = -1
 
     for i in range(min_history, len(df) - max_holding_days, step_days):
+        # Skip if a previous trade is still open (no overlapping positions)
+        if i <= last_trade_exit_idx:
+            continue
+
         # Use only data up to day i (look-ahead bias prevention)
         hist_slice = df.iloc[:i + 1].copy()
         entry_price = float(df.iloc[i]["close"])
         entry_date = df.iloc[i]["date"]
 
         try:
-            result = evaluate_buy_interest(symbol, hist_slice, entry_price)
+            result = evaluate_buy_interest(symbol, hist_slice, entry_price,
+                                           sp500_override=sp500_mock)
         except Exception as e:
             logger.warning(f"Backtest eval failed at index {i}: {e}")
             continue
@@ -115,6 +123,9 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
                 exit_reason = "trailing_stop"
                 days_held = j
                 break
+
+        # Mark trade exit index so the next trade doesn't overlap
+        last_trade_exit_idx = i + days_held
 
         max_return_pct = ((max_price_seen - entry_price) / entry_price) * 100
         actual_return_pct = ((exit_price - entry_price) / entry_price) * 100

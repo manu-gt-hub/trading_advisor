@@ -24,7 +24,7 @@ def load_config():
     return {
         "logger": logger,
         "symbols_interest_list": ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST", "[]")),
-        "revenue_percentage": os.environ.get("REVENUE_PERCENTAGE"),
+        "revenue_percentage": float(os.environ.get("REVENUE_PERCENTAGE", 0)) if os.environ.get("REVENUE_PERCENTAGE") else None,
         "max_records": int(os.environ.get("TRANSACTIONS_MAX_RECORDS", 100)),
         "transactions_file_id": os.environ.get("GDRIVE_FILE_ID"),
         "buy_file_id": os.environ.get("BUY_RECOMMENDATIONS_ID"),
@@ -127,7 +127,9 @@ def enrich_analysis_df(df, analysis, force_opinion):
 
             # Compute stop-loss and take-profit levels
             atr = metrics['signals'].get('ATR_14')
-            sl_tp = compute_stop_loss_take_profit(item['current_price'], atr, revenue_percentage=os.environ.get('REVENUE_PERCENTAGE'))
+            rev_pct_str = os.environ.get('REVENUE_PERCENTAGE')
+            rev_pct = float(rev_pct_str) if rev_pct_str else None
+            sl_tp = compute_stop_loss_take_profit(item['current_price'], atr, revenue_percentage=rev_pct)
             df.loc[df['symbol'] == symbol, 'stop_loss'] = sl_tp['stop_loss']
             df.loc[df['symbol'] == symbol, 'take_profit'] = sl_tp['take_profit']
             df.loc[df['symbol'] == symbol, 'risk_reward_ratio'] = sl_tp['risk_reward_ratio']
@@ -177,6 +179,25 @@ def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
     except Exception as e:
         logger.error(f"❌ Failed to update/save transactions: {e}", exc_info=True)
 
+def filter_buys_by_confidence(analysis_df, min_confidence):
+    """Filter BUY actions by minimum confidence threshold."""
+    buy_df = analysis_df[
+        (analysis_df['action'] == 'BUY') &
+        (analysis_df['technical_confidence'] >= min_confidence)
+    ].copy()
+    return buy_df
+
+
+def filter_buys_by_risk_reward(buy_df, min_rr=1.2):
+    """Filter out BUY recommendations with bad risk/reward ratio."""
+    if buy_df.empty or 'risk_reward_ratio' not in buy_df.columns:
+        return buy_df
+    bad_rr = buy_df[buy_df['risk_reward_ratio'].apply(
+        lambda x: pd.notna(x) and x < min_rr
+    )]
+    return buy_df[~buy_df.index.isin(bad_rr.index)].copy()
+
+
 def save_outputs(buy_df, analysis_df, config):
     logger = logging.getLogger(__name__)
     try:
@@ -188,10 +209,11 @@ def save_outputs(buy_df, analysis_df, config):
     except Exception as e:
         logger.error(f"❌ Failed to save analysis: {e}")
 
-def _is_market_day():
+def _is_market_day(today=None):
     """Check if today is a US stock market trading day (Mon-Fri, not major holidays)."""
     from datetime import date as date_cls
-    today = date_cls.today()
+    if today is None:
+        today = date_cls.today()
     # Weekend check
     if today.weekday() >= 5:  # 5=Saturday, 6=Sunday
         return False

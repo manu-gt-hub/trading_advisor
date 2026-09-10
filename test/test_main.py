@@ -8,24 +8,14 @@ from datetime import date, datetime, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-
-def filter_buys_by_confidence(analysis_df, min_confidence):
-    """Replicates the filtering logic from main.py for testability."""
-    buy_df = analysis_df[
-        (analysis_df['action'] == 'BUY') &
-        (analysis_df['technical_confidence'] >= min_confidence)
-    ].copy()
-    return buy_df
-
-
-def filter_buys_by_risk_reward(buy_df, min_rr=1.2):
-    """Replicates the R:R filtering logic from main.py for testability."""
-    if buy_df.empty or 'risk_reward_ratio' not in buy_df.columns:
-        return buy_df
-    bad_rr = buy_df[buy_df['risk_reward_ratio'].apply(
-        lambda x: pd.notna(x) and x < min_rr
-    )]
-    return buy_df[~buy_df.index.isin(bad_rr.index)].copy()
+# Import real functions from main.py (not local copies) so tests break when code changes.
+# main.py transitively imports google_handler which requires google-auth.
+# Use importorskip so tests are skipped cleanly when the package is missing,
+# but in CI (where google-auth is installed) the real functions are tested.
+try:
+    from main import filter_buys_by_confidence, filter_buys_by_risk_reward, _is_market_day
+except ImportError:
+    pytest.skip("main.py dependencies not installed (google-auth)", allow_module_level=True)
 
 
 class TestMinBuyConfidenceFilter:
@@ -115,16 +105,6 @@ class TestRiskRewardFilter:
         df = pd.DataFrame(columns=['symbol', 'action', 'risk_reward_ratio'])
         result = filter_buys_by_risk_reward(df)
         assert result.empty
-
-
-def _is_market_day(today):
-    """Testable version of market day check — receives date as parameter."""
-    if today.weekday() >= 5:
-        return False
-    us_holidays = [(1, 1), (7, 4), (12, 25)]
-    if (today.month, today.day) in us_holidays:
-        return False
-    return True
 
 
 class TestMarketDayGuard:
