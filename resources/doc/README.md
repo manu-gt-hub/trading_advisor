@@ -18,6 +18,9 @@ A deterministic layered engine (`tools/technical_engine.py`) produces every sign
 | [`04_llm_audit.md`](04_llm_audit.md) | The exact role of the LLM as an auditor (coherence + confidence adjustment) |
 | [`05_pipeline_and_filters.md`](05_pipeline_and_filters.md) | The `main.py` pipeline: confidence, R:R, news, position and correlation filters |
 | [`06_configuration.md`](06_configuration.md) | `technical_config.json` and environment variables |
+| [`../../docs/BACKTEST_LOG.md`](../../docs/BACKTEST_LOG.md) | Backtest results history: baseline metrics, changes made, and before/after comparisons |
+
+> **Important**: Whenever you modify the prediction/decision engine (indicators, weights, regime rules, exit logic, filters in `technical_engine.py`, `custom_financial_calc.py`, `technical_config.json`, or `main.py` pipeline), you **must** run the backtest suite and append a new dated entry to [`docs/BACKTEST_LOG.md`](../../docs/BACKTEST_LOG.md) with the before/after results. This ensures every change to the scoring system has a documented impact measurement.
 
 ## Quick code map
 

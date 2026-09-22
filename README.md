@@ -52,6 +52,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
   - System works best on volatile tech stocks
 - Run all backtests: `python run_backtest_all.py`
 - Normalize CSV formats: `python normalize_csvs.py`
+- **Results log**: See [`docs/BACKTEST_LOG.md`](docs/BACKTEST_LOG.md) for historical results and change impact. **Must be updated** whenever the prediction engine is modified.
 
 ### Infrastructure
 - **Daily execution** via GitHub Actions (scheduled cron)
@@ -94,6 +95,7 @@ pip install -r requirements.txt
 | `LLM_AUDIT_ENABLED` | Enable LLM audit for BUY signals (`true`/`false`, default `true`). **Recommended: `false`** for more consistent, deterministic signals |
 | `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
 | `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
+| `MIN_RISK_REWARD_RATIO` | Minimum risk/reward ratio to accept a BUY (default `1.2`) |
 | `NEWS_SENT_ANALYSIS` | Enable news sentiment filter (`true`/`false`, default `false`) |
 
 ### Usage
