@@ -170,7 +170,6 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
             gain_pct = ((highest_price - buy_value) / buy_value) * 100
             if gain_pct >= 2.0 and pd.notna(stop_loss) and stop_loss > 0:
                 # Trail distance = original risk (buy_value - initial stop_loss)
-                # but capped at the distance from buy to current highest
                 original_risk = buy_value - stop_loss
                 if original_risk > 0:
                     trailing_stop = highest_price - original_risk

@@ -18,6 +18,20 @@ A deterministic layered engine (`tools/technical_engine.py`) produces every sign
 | [`04_llm_audit.md`](04_llm_audit.md) | The exact role of the LLM as an auditor (coherence + confidence adjustment) |
 | [`05_pipeline_and_filters.md`](05_pipeline_and_filters.md) | The `main.py` pipeline: confidence, R:R, news, position and correlation filters |
 | [`06_configuration.md`](06_configuration.md) | `technical_config.json` and environment variables |
+| [`../../docs/BACKTEST_LOG.md`](../../docs/BACKTEST_LOG.md) | Backtest results history: baseline metrics, changes made, and before/after comparisons |
+
+> **Important — backtest workflow for engine changes:**
+>
+> [`docs/BACKTEST_LOG.md`](../../docs/BACKTEST_LOG.md) is the **single source of truth** for measuring the prediction engine's quality. The latest entry is always the current baseline. Whenever you modify the prediction/decision engine (indicators, weights, regime rules, exit logic, trailing stop parameters, filters in `technical_engine.py`, `custom_financial_calc.py`, `technical_config.json`, or `main.py` pipeline):
+>
+> 1. **Run the backtest** (`python run_backtest_all.py`) **before and after** the change.
+> 2. **Compare** the new results against the latest `BACKTEST_LOG.md` entry (the baseline): win rate, expectancy, profit factor, MAE/MFE, and per-symbol breakdown.
+> 3. **Report to the user** with a clear before-vs-after summary, highlighting what improved and what degraded.
+> 4. **Ask the user** whether to keep the changes or revert them.
+> 5. If the user **approves**: append a new dated section to `BACKTEST_LOG.md` with the changes made, before/after tables, and any diagnostics. This becomes the new baseline.
+> 6. If the user **rejects**: revert the code changes. Do not update `BACKTEST_LOG.md`.
+>
+> The file uses dated sections (`## YYYY-MM-DD — description`) as entries. Keep all entries in a single file for easy comparison — do not create separate files per date.
 
 ## Quick code map
 
