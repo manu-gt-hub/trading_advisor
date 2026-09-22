@@ -17,5 +17,12 @@
   "XOM": {"market": "NYSE"},
   "JNJ": {"market": "NYSE"},
   "KO": {"market": "NYSE"},
-  "TEVA": {"market": "NYSE"}
+  "TEVA": {"market": "NYSE"},
+  "TSM": {"market": "NYSE"},
+  "ASML": {"market": "NASDAQ"},
+  "MA": {"market": "NYSE"},
+  "CRWD": {"market": "NASDAQ"},
+  "GE": {"market": "NYSE"},
+  "CEG": {"market": "NASDAQ"},
+  "ETN": {"market": "NYSE"}
 }
