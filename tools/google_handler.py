@@ -138,42 +138,58 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
 
             if not analysis_row.empty:
                 current_price = analysis_row.iloc[0]['current_price']
-                target_price = buy_value * (1 + float(revenue_percentage) / 100)
-
-                # Check stop-loss hit (trailing stop)
-                stop_loss = row.get('stop_loss')
-                stop_hit = pd.notna(stop_loss) and current_price <= stop_loss
-
-                if current_price >= target_price or stop_hit:
-                    # Normalize all dates to ISO strings so they sort/serialize consistently
-                    sell_date_obj = datetime.today().date()
-                    buy_date_raw = pd.to_datetime(row['buy_date'], errors='coerce')
-                    if pd.isna(buy_date_raw):
-                        logger.error(f"❌ Cannot compute days held for {symbol}: invalid buy_date '{row['buy_date']}'. Skipping sale.")
-                        continue
-                    buy_date = buy_date_raw.date()
-                    days_diff = (sell_date_obj - buy_date).days
-
-                    # Use the actual exit price: target_price when target hit, stop_loss when stopped out
-                    if stop_hit:
-                        exit_price = float(stop_loss)
-                        logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
+            else:
+                # Symbol not in current analysis run (e.g. removed from interest list).
+                # Fetch live price so open positions are still reviewed for exit.
+                try:
+                    from tools import finnhub_client
+                    quote = finnhub_client.get_quote(symbol)
+                    if quote and quote.get("c"):
+                        current_price = float(quote["c"])
+                        logger.info(f"📡 Fetched live price for open position {symbol}: {current_price:.2f}")
                     else:
-                        # Target hit: use target_price to respect revenue_percentage
-                        exit_price = target_price
-                        logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
+                        logger.warning(f"⚠️ Could not fetch price for {symbol}. Skipping transaction review.")
+                        continue
+                except Exception as e:
+                    logger.warning(f"⚠️ Error fetching price for {symbol}: {e}. Skipping.")
+                    continue
 
-                    pct = ((exit_price - buy_value) / buy_value) * 100
+            target_price = buy_value * (1 + float(revenue_percentage) / 100)
 
-                    # Update the transaction record (store dates as ISO strings for consistency)
-                    df_transactions.at[idx, 'sell_value'] = round(exit_price, 2)
-                    df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
-                    df_transactions.at[idx, 'buy_sell_days_diff'] = int(days_diff)
-                    df_transactions.at[idx, 'percentage_benefit'] = round(pct, 2)
-                    logger.info(
-                        f"✅ Closed {symbol}: buy={buy_value:.2f}, sell={exit_price:.2f}, "
-                        f"days={days_diff}, benefit={pct:.2f}%, date={sell_date_obj.isoformat()}"
-                    )
+            # Check stop-loss hit (trailing stop)
+            stop_loss = row.get('stop_loss')
+            stop_hit = pd.notna(stop_loss) and current_price <= stop_loss
+
+            if current_price >= target_price or stop_hit:
+                # Normalize all dates to ISO strings so they sort/serialize consistently
+                sell_date_obj = datetime.today().date()
+                buy_date_raw = pd.to_datetime(row['buy_date'], errors='coerce')
+                if pd.isna(buy_date_raw):
+                    logger.error(f"❌ Cannot compute days held for {symbol}: invalid buy_date '{row['buy_date']}'. Skipping sale.")
+                    continue
+                buy_date = buy_date_raw.date()
+                days_diff = (sell_date_obj - buy_date).days
+
+                # Use the actual exit price: target_price when target hit, stop_loss when stopped out
+                if stop_hit:
+                    exit_price = float(stop_loss)
+                    logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
+                else:
+                    # Target hit: use target_price to respect revenue_percentage
+                    exit_price = target_price
+                    logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
+
+                pct = ((exit_price - buy_value) / buy_value) * 100
+
+                # Update the transaction record (store dates as ISO strings for consistency)
+                df_transactions.at[idx, 'sell_value'] = round(exit_price, 2)
+                df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
+                df_transactions.at[idx, 'buy_sell_days_diff'] = int(days_diff)
+                df_transactions.at[idx, 'percentage_benefit'] = round(pct, 2)
+                logger.info(
+                    f"✅ Closed {symbol}: buy={buy_value:.2f}, sell={exit_price:.2f}, "
+                    f"days={days_diff}, benefit={pct:.2f}%, date={sell_date_obj.isoformat()}"
+                )
         except Exception as e:
             logger.error(f"❌ Error processing transaction row {idx}: {e}. Skipping.")
 
