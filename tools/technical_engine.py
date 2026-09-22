@@ -29,9 +29,9 @@ _CONFIG_CACHE = None
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "resources" / "technical_config.json"
 
 # Single source of truth for the BUY threshold: the MIN_BUY_CONFIDENCE env var
-# (the same knob used as the post-audit acceptance filter in main.py). This
-# default is only used when the env var is not set (e.g. local runs / tests).
-DEFAULT_BUY_THRESHOLD = 0.6
+# (the same knob used as the post-audit acceptance filter in main.py).
+# Fallback: JSON config "buy_threshold_default" (0.5), then this constant.
+DEFAULT_BUY_THRESHOLD = 0.5
 
 
 def resolve_buy_threshold(config: dict = None) -> float:
@@ -226,10 +226,21 @@ def compute_momentum_score(features: dict, config: dict = None):
     factors["roc"] = _clip(_tanh(roc * roc_scale), -1.0, 1.0)
 
     # Candlestick patterns (optional, only when a pattern is detected)
+    # Context-aware: bullish patterns count more in pullbacks/bottoms (price < SMA50),
+    # bearish patterns count more in extended rallies (price > SMA50).
+    # Both bull + bear cancel out instead of silently dropping bear.
     candle_bull = features.get("candle_bullish", False)
     candle_bear = features.get("candle_bearish", False)
-    if candle_bull or candle_bear:
-        factors["candlestick"] = 1.0 if candle_bull else -1.0
+    if candle_bull and candle_bear:
+        factors["candlestick"] = 0.0  # conflicting patterns cancel out
+    elif candle_bull:
+        # Bullish pattern at pullback (below SMA50) is stronger than at highs
+        below_sma50 = price < _safe(features.get("sma50")) if _safe(features.get("sma50")) else False
+        factors["candlestick"] = 1.0 if below_sma50 else 0.5
+    elif candle_bear:
+        # Bearish pattern at extended highs (above SMA50) is stronger
+        above_sma50 = price > _safe(features.get("sma50")) if _safe(features.get("sma50")) else False
+        factors["candlestick"] = -1.0 if above_sma50 else -0.5
 
     # Bollinger squeeze (optional, only added during squeeze)
     bb_bw = _safe(features.get("bb_bandwidth"))

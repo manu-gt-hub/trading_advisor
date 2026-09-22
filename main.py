@@ -31,6 +31,7 @@ def load_config():
         "analysis_file_id": os.environ.get("ANALYSIS_FILE_ID"),
         "force_opinion": os.environ.get("FORCE_OPINION"),
         "min_buy_confidence": float(os.environ.get("MIN_BUY_CONFIDENCE", 0.6)),
+        "min_risk_reward_ratio": float(os.environ.get("MIN_RISK_REWARD_RATIO", 1.2)),
         "news_sent_analysis": os.environ.get("NEWS_SENT_ANALYSIS", "false").lower() == "true",
     }
 
@@ -168,7 +169,7 @@ def update_and_save_transactions(config, analysis_df, buy_df, now_madrid):
         desired_order = [
             'symbol', 'buy_value', 'buy_date', 'sell_value', 'sell_date',
             'buy_sell_days_diff', 'percentage_benefit', 'stop_loss', 'take_profit',
-            'risk_reward_ratio', 'tradingview_url',
+            'highest_price', 'risk_reward_ratio', 'tradingview_url',
         ]
         ordered_cols = [c for c in desired_order if c in final_df.columns]
         extra_cols = [c for c in final_df.columns if c not in desired_order]
@@ -295,7 +296,7 @@ def main(show_dataframes=False):
 
     # Risk/Reward filter: block BUYs with bad risk/reward ratio
     if not buy_df.empty and 'risk_reward_ratio' in buy_df.columns:
-        min_rr = 1.2
+        min_rr = config["min_risk_reward_ratio"]
         bad_rr = buy_df[buy_df['risk_reward_ratio'].apply(
             lambda x: pd.notna(x) and x < min_rr
         )]

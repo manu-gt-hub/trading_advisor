@@ -16,5 +16,6 @@
   "RHM.DE": {"market": "XETR", "symbol": "RHM"},
   "XOM": {"market": "NYSE"},
   "JNJ": {"market": "NYSE"},
-  "KO": {"market": "NYSE"}
+  "KO": {"market": "NYSE"},
+  "TEVA": {"market": "NYSE"}
 }

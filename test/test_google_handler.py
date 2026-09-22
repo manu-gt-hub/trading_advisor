@@ -10,6 +10,7 @@ from dotenv import dotenv_values
 import pytest
 import sys
 from datetime import datetime, timedelta
+from unittest.mock import patch, MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
 
@@ -217,4 +218,49 @@ def test_update_transactions_repairs_blank_string_sell_date():
     assert aapl_row['sell_date'] == today.isoformat()
     assert aapl_row['buy_sell_days_diff'] == 10
     assert round(aapl_row['percentage_benefit'], 2) == 10.0
+
+
+@patch("tools.finnhub_client.get_quote")
+def test_update_transactions_fetches_live_price_for_missing_symbol(mock_get_quote):
+    """
+    When a symbol has an open transaction but is NOT in the current analysis run,
+    update_transactions should fetch the live price via Finnhub and still close
+    the transaction if target is reached.
+    """
+    today = datetime.today().date()
+    buy_date = today - timedelta(days=20)
+
+    # Analysis has only AMD — AAPL is missing (not in SYMBOLS_INTEREST_LIST this run)
+    df_analysis = pd.DataFrame({
+        'symbol': ['AMD'],
+        'current_price': [145.0],
+    })
+
+    # AAPL has an open transaction with buy_value=307.14, should sell at 10% target
+    df_transactions = pd.DataFrame({
+        'symbol': ['AAPL', 'AMD'],
+        'buy_value': [307.14, 140.0],
+        'buy_date': [buy_date, buy_date],
+        'sell_value': [None, None],
+        'sell_date': [None, None],
+        'buy_sell_days_diff': [None, None],
+        'percentage_benefit': [None, None],
+    })
+
+    # Mock Finnhub to return a price of 340 for AAPL (above 10% target = 337.85)
+    mock_get_quote.return_value = {"c": 340.0}
+
+    updated_df = google_handler.update_transactions(df_analysis, df_transactions, 10)
+
+    aapl_row = updated_df[updated_df['symbol'] == 'AAPL'].iloc[0]
+    expected_target = round(307.14 * 1.10, 2)  # 337.85
+    assert aapl_row['sell_value'] == expected_target, (
+        f"AAPL should be sold at target price {expected_target}, got {aapl_row['sell_value']}"
+    )
+    assert aapl_row['sell_date'] == today.isoformat()
+    assert round(aapl_row['percentage_benefit'], 2) == 10.0
+
+    # AMD should not be sold (145 < 154)
+    amd_row = updated_df[updated_df['symbol'] == 'AMD'].iloc[0]
+    assert pd.isna(amd_row['sell_value'])
 

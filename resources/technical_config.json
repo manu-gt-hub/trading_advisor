@@ -19,7 +19,7 @@
   "layers": {
     "trend": {
       "description": "Directional structure of price. Output normalized to [-1, 1]. Weights are relative: when an indicator is unavailable (e.g. weekly_confirmation with insufficient history) the remaining weights are renormalized automatically.",
-      "layer_weight": 0.55,
+      "layer_weight": 0.45,
       "indicators": {
         "sma_cross": {
           "weight": 0.25,
@@ -47,7 +47,7 @@
           "norm": "(+DI - -DI)/(+DI + -DI) scaled by min(ADX/40, 1)"
         },
         "weekly_confirmation": {
-          "weight": 0.20,
+          "weight": 0.10,
           "optional": true,
           "params": { "ma_fast": 10, "ma_slow": 30 },
           "norm": "0.5*(weekly MA10>MA30 ? +1 : -1) + 0.5*(price>weekly MA10 ? +1 : -1); only applied when weekly history is sufficient"
@@ -57,7 +57,7 @@
 
     "momentum": {
       "description": "Speed/strength of price move. RSI + MACD are PRIMARY; Stoch RSI + ROC are SECONDARY. Output normalized to [-1, 1].",
-      "layer_weight": 0.45,
+      "layer_weight": 0.55,
       "indicators": {
         "rsi": {
           "tier": "primary",
