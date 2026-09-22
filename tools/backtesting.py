@@ -93,16 +93,24 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
 
         # Simulate trade with trailing stop + target exit
         max_price_seen = entry_price
+        min_price_seen = entry_price
         exit_price = float(future.iloc[-1]["close"])  # default: exit at end
         exit_reason = "max_hold"
         days_held = len(future)
         hit_target = False
         days_to_target = None
+        day_of_mfe = 0  # day when MFE was reached
+        day_of_mae = 0  # day when MAE was reached
+        gain_at_trailing_trigger = None  # gain% when trailing stop was activated
 
         for j, (_, row) in enumerate(future.iterrows(), 1):
             close = float(row["close"])
             if close > max_price_seen:
                 max_price_seen = close
+                day_of_mfe = j
+            if close < min_price_seen:
+                min_price_seen = close
+                day_of_mae = j
 
             # Check target hit
             pct_from_entry = ((close - entry_price) / entry_price) * 100
@@ -119,6 +127,7 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             if (trailing_stop_distance
                     and max_gain_pct >= trailing_activation_pct
                     and max_price_seen - close >= trailing_stop_distance):
+                gain_at_trailing_trigger = round(pct_from_entry, 2)
                 exit_price = close
                 exit_reason = "trailing_stop"
                 days_held = j
@@ -127,19 +136,26 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         # Mark trade exit index so the next trade doesn't overlap
         last_trade_exit_idx = i + days_held
 
-        max_return_pct = ((max_price_seen - entry_price) / entry_price) * 100
+        # MAE/MFE metrics
+        mfe_pct = ((max_price_seen - entry_price) / entry_price) * 100
+        mae_pct = ((min_price_seen - entry_price) / entry_price) * 100
         actual_return_pct = ((exit_price - entry_price) / entry_price) * 100
 
         trades.append({
             "entry_date": entry_date,
             "entry_price": round(entry_price, 2),
             "confidence": round(confidence, 2),
-            "max_return_pct": round(max_return_pct, 2),
+            "mfe_pct": round(mfe_pct, 2),
+            "mae_pct": round(mae_pct, 2),
+            "day_of_mfe": day_of_mfe,
+            "day_of_mae": day_of_mae,
+            "max_return_pct": round(mfe_pct, 2),
             "actual_return_pct": round(actual_return_pct, 2),
             "hit_target": hit_target,
             "days_to_target": days_to_target,
             "exit_reason": exit_reason,
             "days_held": days_held,
+            "gain_at_trailing_trigger": gain_at_trailing_trigger,
         })
 
     # Compute buy-and-hold benchmark over the same period
@@ -171,6 +187,22 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         system_cumulative *= (1 + r / 100)
     system_return_pct = (system_cumulative - 1) * 100
 
+    # Expectancy and profit factor
+    winners = trades_df[trades_df["actual_return_pct"] > 0]
+    losers = trades_df[trades_df["actual_return_pct"] <= 0]
+    avg_win = float(winners["actual_return_pct"].mean()) if len(winners) > 0 else 0.0
+    avg_loss = float(losers["actual_return_pct"].mean()) if len(losers) > 0 else 0.0
+    gross_profit = float(winners["actual_return_pct"].sum()) if len(winners) > 0 else 0.0
+    gross_loss = abs(float(losers["actual_return_pct"].sum())) if len(losers) > 0 else 0.0
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+    expectancy = (win_rate * avg_win) + ((1 - win_rate) * avg_loss)
+
+    # MAE/MFE summary
+    avg_mfe = float(trades_df["mfe_pct"].mean())
+    avg_mae = float(trades_df["mae_pct"].mean())
+    avg_day_mfe = float(trades_df["day_of_mfe"].mean())
+    avg_day_mae = float(trades_df["day_of_mae"].mean())
+
     return {
         "symbol": symbol,
         "target_profit_pct": target_profit_pct,
@@ -191,6 +223,16 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         "system_cumulative_return_pct": round(system_return_pct, 2),
         "benchmark_buy_hold_pct": round(bh_return_pct, 2),
         "system_vs_benchmark": round(system_return_pct - bh_return_pct, 2),
+        # Expectancy and profit factor
+        "avg_win_pct": round(avg_win, 2),
+        "avg_loss_pct": round(avg_loss, 2),
+        "profit_factor": round(profit_factor, 2),
+        "expectancy_pct": round(expectancy, 2),
+        # MAE/MFE
+        "avg_mfe_pct": round(avg_mfe, 2),
+        "avg_mae_pct": round(avg_mae, 2),
+        "avg_day_of_mfe": round(avg_day_mfe, 1),
+        "avg_day_of_mae": round(avg_day_mae, 1),
         "trades": trades,
     }
 
@@ -217,14 +259,20 @@ def format_backtest_report(results):
         f"  Losses:            {results['losses']}",
         f"  WIN RATE:          {results['win_rate']:.1%}",
         f"───────────────────────────────────────────",
-        f"  Avg max return:    {results['avg_max_return_pct']:+.2f}%",
         f"  Avg actual return: {results['avg_actual_return_pct']:+.2f}%",
         f"  Median return:     {results['median_actual_return_pct']:+.2f}%",
         f"  Best trade:        {results['best_trade_pct']:+.2f}%",
         f"  Worst trade:       {results['worst_trade_pct']:+.2f}%",
+        f"  Avg win:           {results['avg_win_pct']:+.2f}%",
+        f"  Avg loss:          {results['avg_loss_pct']:+.2f}%",
+        f"  Profit factor:     {results['profit_factor']:.2f}",
+        f"  Expectancy/trade:  {results['expectancy_pct']:+.2f}%",
     ]
     if results["avg_days_to_target"]:
         lines.append(f"  Avg days to target:{results['avg_days_to_target']:.0f} days")
+    lines.append(f"───────────────────────────────────────────")
+    lines.append(f"  MFE (avg best):    {results['avg_mfe_pct']:+.2f}%  (day {results['avg_day_of_mfe']:.0f})")
+    lines.append(f"  MAE (avg worst):   {results['avg_mae_pct']:+.2f}%  (day {results['avg_day_of_mae']:.0f})")
     lines.append(f"───────────────────────────────────────────")
     lines.append(f"  System cumulative: {results['system_cumulative_return_pct']:+.2f}%")
     lines.append(f"  Buy & Hold:        {results['benchmark_buy_hold_pct']:+.2f}%")

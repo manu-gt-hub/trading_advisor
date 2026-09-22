@@ -189,6 +189,14 @@ def test_format_backtest_report_with_trades():
         "system_cumulative_return_pct": 42.5,
         "benchmark_buy_hold_pct": 60.0,
         "system_vs_benchmark": -17.5,
+        "avg_win_pct": 10.5,
+        "avg_loss_pct": -2.1,
+        "profit_factor": 3.5,
+        "expectancy_pct": 5.46,
+        "avg_mfe_pct": 8.3,
+        "avg_mae_pct": -1.5,
+        "avg_day_of_mfe": 12.0,
+        "avg_day_of_mae": 5.0,
         "trades": [],
     }
     report = format_backtest_report(results)
@@ -198,6 +206,10 @@ def test_format_backtest_report_with_trades():
     assert "Buy & Hold" in report
     assert "System vs B&H" in report
     assert "0.35" in report
+    assert "Profit factor" in report
+    assert "Expectancy" in report
+    assert "MFE" in report
+    assert "MAE" in report
 
 
 # ─── Multi-symbol parametrized tests ──────────────────────────────────
