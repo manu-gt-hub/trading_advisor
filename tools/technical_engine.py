@@ -199,6 +199,7 @@ def compute_momentum_score(features: dict, config: dict = None):
     ind = config["layers"]["momentum"]["indicators"]
     factors = {}
 
+    price = _safe(features.get("price"))
     rsi = _safe(features.get("rsi"), 50.0)
     macd = _safe(features.get("macd"))
     macd_signal = _safe(features.get("macd_signal"))
