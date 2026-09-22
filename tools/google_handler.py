@@ -89,6 +89,8 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
         df_transactions['stop_loss'] = pd.to_numeric(df_transactions['stop_loss'], errors='coerce')
     if 'take_profit' in df_transactions.columns:
         df_transactions['take_profit'] = pd.to_numeric(df_transactions['take_profit'], errors='coerce')
+    if 'highest_price' in df_transactions.columns:
+        df_transactions['highest_price'] = pd.to_numeric(df_transactions['highest_price'], errors='coerce')
     # Loop through each row in the transactions dataframe
     for idx, row in df_transactions.iterrows():
         try:
@@ -156,8 +158,30 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
 
             target_price = buy_value * (1 + float(revenue_percentage) / 100)
 
-            # Check stop-loss hit (trailing stop)
-            stop_loss = row.get('stop_loss')
+            # --- Trailing stop logic ---
+            # Track highest price seen for this position; ratchet stop_loss up.
+            stop_loss = pd.to_numeric(row.get('stop_loss'), errors='coerce')
+            highest_price = pd.to_numeric(row.get('highest_price'), errors='coerce')
+            if pd.isna(highest_price) or current_price > highest_price:
+                highest_price = current_price
+                df_transactions.at[idx, 'highest_price'] = round(highest_price, 2)
+
+            # Only activate trailing stop after position is in profit by >= 2%
+            gain_pct = ((highest_price - buy_value) / buy_value) * 100
+            if gain_pct >= 2.0 and pd.notna(stop_loss) and stop_loss > 0:
+                # Trail distance = original risk (buy_value - initial stop_loss)
+                # but capped at the distance from buy to current highest
+                original_risk = buy_value - stop_loss
+                if original_risk > 0:
+                    trailing_stop = highest_price - original_risk
+                    if trailing_stop > stop_loss:
+                        logger.info(
+                            f"📈 Trailing stop for {symbol}: {stop_loss:.2f} → {trailing_stop:.2f} "
+                            f"(highest={highest_price:.2f}, gain={gain_pct:.1f}%)"
+                        )
+                        stop_loss = trailing_stop
+                        df_transactions.at[idx, 'stop_loss'] = round(stop_loss, 2)
+
             stop_hit = pd.notna(stop_loss) and current_price <= stop_loss
 
             if current_price >= target_price or stop_hit:

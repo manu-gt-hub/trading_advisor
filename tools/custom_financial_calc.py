@@ -78,28 +78,58 @@ def _compute_obv(df):
     return obv
 
 
-def _detect_bearish_divergence(df, lookback=14):
+def _find_swing_highs(series, order=5):
+    """Find swing high indices: points higher than `order` bars on each side."""
+    highs = []
+    values = series.values
+    for i in range(order, len(values) - order):
+        if all(values[i] >= values[i - j] for j in range(1, order + 1)) and \
+           all(values[i] >= values[i + j] for j in range(1, order + 1)):
+            highs.append(i)
+    return highs
+
+
+def _detect_bearish_divergence(df, lookback=50):
     """
-    Detect bearish divergence: price makes a higher high while OBV or RSI makes a
-    lower high. Treated as a RISK factor (not momentum). Returns True/False.
+    Detect bearish divergence: price makes a higher swing-high while OBV or RSI
+    makes a lower swing-high at the corresponding peak.
+    Uses actual swing pivots (local maxima) instead of block max comparisons.
+    Treated as a RISK factor (not momentum). Returns True/False.
     """
     try:
-        if len(df) < 2 * lookback:
+        if len(df) < lookback:
             return False
-        recent = df.tail(lookback)
-        prior = df.iloc[-2 * lookback:-lookback]
+        window = df.tail(lookback).copy()
+        window = window.reset_index(drop=True)
 
-        price_higher_high = recent["close"].max() > prior["close"].max()
-        if not price_higher_high:
+        # Find swing highs in price (order=5 means higher than 5 bars on each side)
+        price_pivots = _find_swing_highs(window["close"], order=5)
+        if len(price_pivots) < 2:
             return False
 
+        # Compare the last two swing highs
+        last_pivot = price_pivots[-1]
+        prev_pivot = price_pivots[-2]
+
+        # Price must make a higher high
+        if window["close"].iloc[last_pivot] <= window["close"].iloc[prev_pivot]:
+            return False
+
+        # Check OBV at those same pivot points
         obv_lower = False
-        if "obv" in df.columns and recent["obv"].notna().any() and prior["obv"].notna().any():
-            obv_lower = recent["obv"].max() < prior["obv"].max()
+        if "obv" in window.columns:
+            obv_last = window["obv"].iloc[last_pivot]
+            obv_prev = window["obv"].iloc[prev_pivot]
+            if pd.notna(obv_last) and pd.notna(obv_prev):
+                obv_lower = obv_last < obv_prev
 
+        # Check RSI at those same pivot points
         rsi_lower = False
-        if "rsi" in df.columns and recent["rsi"].notna().any() and prior["rsi"].notna().any():
-            rsi_lower = recent["rsi"].max() < prior["rsi"].max()
+        if "rsi" in window.columns:
+            rsi_last = window["rsi"].iloc[last_pivot]
+            rsi_prev = window["rsi"].iloc[prev_pivot]
+            if pd.notna(rsi_last) and pd.notna(rsi_prev):
+                rsi_lower = rsi_last < rsi_prev
 
         return bool(obv_lower or rsi_lower)
     except Exception as e:
