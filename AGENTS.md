@@ -4,6 +4,26 @@ This file is the **harness contract** for any LLM/agent working on this reposito
 Read it fully before making changes. If your host also loads `CLAUDE.md` or similar
 files, treat this file as the canonical source for workflow rules.
 
+## Harness layout
+
+```
+AGENTS.md            # THIS FILE — overview + rules summary (read first)
+CLAUDE.md            # pointer → AGENTS.md
+.agent/
+  instructions/      # static context: architecture.md, engine.md, commands.md, env_vars.md
+  workflows/         # SOPs: engine_change.md, commit.md, new_parameter.md
+  policies/          # hard rules: backtest_policy.md, commit_policy.md, secrets_policy.md
+evals/
+  tasks/             # task prompts for evaluating agent compliance
+  fixtures/          # frozen baselines (expected backtest metrics)
+  rubrics/           # scoring checklists (engine_change_rubric.md, commit_rubric.md)
+  run/               # verify_invariants.py — automated compliance checks
+```
+
+The `.agent/` modules contain the full detail of each rule summarized here —
+when in doubt, the **policies/** files are authoritative. `evals/` is used to
+grade whether an agent actually followed the rules.
+
 ---
 
 ## 1. What this project is
@@ -96,11 +116,24 @@ All ~117 tests must pass. If you changed behavior, update or add tests. If a tes
 fails because behavior intentionally changed, update the test AND note it in your
 report to the user.
 
-### Rule 3 — No commits without asking
+### Rule 3 — Confirm before committing (unless auto-commit was authorized)
 
-Do not `git commit` or `git push` unless the user has asked for it or approved it
-as part of the Rule 1 flow. Never commit secrets, API keys, credentials, or `.env`
-files.
+Before any `git commit` or `git push`, **always**:
+
+1. Present the user a summary of the pending changes: files touched, what changed
+   and why, plus test/backtest status.
+2. Propose the commit message.
+3. Wait for explicit user confirmation ("commit it", "yes", etc.).
+
+This applies to **all** changes — docs, config, tests, engine code — not only
+engine changes. Never commit silently, never batch a commit into a larger
+approved action without listing it, never commit secrets, API keys, credentials,
+or `.env` files. Pushing also requires its own explicit approval.
+
+**Exception**: if the user explicitly says when launching the task that the
+agent may commit automatically ("hazlo y commitea", "implement and commit"),
+the agent may commit directly as part of the task — and should report what it
+committed afterwards. The authorization is per-task and does not carry over.
 
 ### Rule 4 — Keep `docs/BACKTEST_LOG.md` honest
 
@@ -192,3 +225,4 @@ only the optional yfinance valuation fetch touches the network.
 - [ ] `pytest` green
 - [ ] `docs/BACKTEST_LOG.md` updated (if approved)
 - [ ] `resources/doc/*.md` updated (if weights/thresholds changed significantly)
+- [ ] Change summary + proposed commit message shown to user; commit only after explicit confirmation (or per-task auto-commit authorization — then report what was committed)
