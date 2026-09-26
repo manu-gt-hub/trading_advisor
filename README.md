@@ -53,6 +53,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 - Run all backtests: `python run_backtest_all.py`
 - Normalize CSV formats: `python normalize_csvs.py`
 - **Results log**: See [`docs/BACKTEST_LOG.md`](docs/BACKTEST_LOG.md) for historical results and change impact. **Must be updated** whenever the prediction engine is modified.
+- **AI agents**: [`AGENTS.md`](AGENTS.md) is the canonical harness file — mandatory backtest-before-commit workflow, architecture map, and conventions for any LLM/agent editing this repo.
 
 ### Infrastructure
 - **Daily execution** via GitHub Actions (scheduled cron)
