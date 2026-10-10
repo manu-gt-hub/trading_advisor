@@ -79,7 +79,9 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
 
     # Ensure columns we are going to write can accept mixed types
     # (Google Sheets may export empty cells as strings, giving the column a string dtype).
-    for col in ['sell_value', 'sell_date', 'buy_sell_days_diff', 'percentage_benefit']:
+    if 'sell_reason' not in df_transactions.columns:
+        df_transactions['sell_reason'] = None
+    for col in ['sell_value', 'sell_date', 'buy_sell_days_diff', 'percentage_benefit', 'sell_reason']:
         if col in df_transactions.columns:
             df_transactions[col] = df_transactions[col].astype(object)
 
@@ -125,6 +127,7 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
                 df_transactions.at[idx, 'buy_sell_days_diff'] = int(days_diff)
                 df_transactions.at[idx, 'percentage_benefit'] = round(pct, 2)
+                df_transactions.at[idx, 'sell_reason'] = 'repaired'
                 logger.info(
                     f"✅ Repaired {symbol}: buy={buy_value:.2f}, sell={exit_price:.2f}, "
                     f"days={days_diff}, benefit={pct:.2f}%, date={sell_date_obj.isoformat()}"
@@ -196,10 +199,12 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 # Use the actual exit price: target_price when target hit, stop_loss when stopped out
                 if stop_hit:
                     exit_price = float(stop_loss)
+                    sell_reason = 'stop_loss'
                     logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
                 else:
                     # Target hit: use target_price to respect revenue_percentage
                     exit_price = target_price
+                    sell_reason = 'take_profit'
                     logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
 
                 pct = ((exit_price - buy_value) / buy_value) * 100
@@ -209,6 +214,7 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
                 df_transactions.at[idx, 'buy_sell_days_diff'] = int(days_diff)
                 df_transactions.at[idx, 'percentage_benefit'] = round(pct, 2)
+                df_transactions.at[idx, 'sell_reason'] = sell_reason
                 logger.info(
                     f"✅ Closed {symbol}: buy={buy_value:.2f}, sell={exit_price:.2f}, "
                     f"days={days_diff}, benefit={pct:.2f}%, date={sell_date_obj.isoformat()}"
