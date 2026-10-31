@@ -7,9 +7,29 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 import logging
+import pytz
 from dotenv import load_dotenv
+from tools.risk_management import update_open_position
 
 logger = logging.getLogger(__name__)
+
+# '+'/'-' are left alone: labels such as "-0.40 SELL | ..." legitimately start with them
+_FORMULA_PREFIXES = ("=", "@")
+
+
+def _today_madrid():
+    """Calendar date in Madrid, the same timezone used for buy_date."""
+    return datetime.now(pytz.timezone("Europe/Madrid")).date()
+
+
+def _neutralize_formulas(df):
+    """Prefix text cells that Google Sheets would evaluate as formulas (CSV injection)."""
+    def fix(v):
+        return "'" + v if isinstance(v, str) and v.startswith(_FORMULA_PREFIXES) else v
+    out = df.copy()
+    for col in out.select_dtypes(include="object").columns:
+        out[col] = out[col].map(fix)
+    return out
 
 def _is_missing(value):
     """Return True for NaN, None, empty/whitespace strings or literal 'NaT'/'nan'/'None'."""
@@ -45,10 +65,9 @@ def get_drive_service():
 
 def load_data(file_id):
     # Load CSV data exported from Google Sheets on Google Drive
-    service = get_drive_service()
-    
     if not file_id:
         raise Exception("Environment variable GDRIVE_FILE_ID not found")
+    service = get_drive_service()
     try:
         # Use export_media to export Google Sheets as CSV
         request = service.files().export_media(fileId=file_id, mimeType='text/csv')
@@ -121,7 +140,7 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 if _is_missing(buy_date_raw):
                     logger.error(f"❌ Cannot repair {symbol}: invalid buy_date '{row['buy_date']}'")
                     continue
-                sell_date_obj = datetime.today().date()
+                sell_date_obj = _today_madrid()
                 days_diff = (sell_date_obj - buy_date_raw.date()).days
                 pct = ((exit_price - buy_value) / buy_value) * 100
                 df_transactions.at[idx, 'sell_date'] = sell_date_obj.isoformat()
@@ -161,50 +180,32 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
 
             target_price = buy_value * (1 + float(revenue_percentage) / 100)
 
-            # --- Trailing stop logic ---
-            # Track highest price seen for this position; ratchet stop_loss up.
-            stop_loss = pd.to_numeric(row.get('stop_loss'), errors='coerce')
-            highest_price = pd.to_numeric(row.get('highest_price'), errors='coerce')
-            if pd.isna(highest_price) or current_price > highest_price:
-                highest_price = current_price
-                df_transactions.at[idx, 'highest_price'] = round(highest_price, 2)
+            # Trailing stop + exit rules are shared with the backtester
+            pos = update_open_position(
+                buy_value, row.get('stop_loss'), row.get('highest_price'), current_price, target_price
+            )
+            if pos['highest_changed']:
+                df_transactions.at[idx, 'highest_price'] = pos['highest_price']
+            if pos['trailed_from'] is not None:
+                gain_pct = ((pos['highest_price'] - buy_value) / buy_value) * 100
+                logger.info(
+                    f"📈 Trailing stop for {symbol}: {pos['trailed_from']:.2f} → {pos['stop_loss']:.2f} "
+                    f"(highest={pos['highest_price']:.2f}, gain={gain_pct:.1f}%)"
+                )
+                df_transactions.at[idx, 'stop_loss'] = pos['stop_loss']
 
-            # Only activate trailing stop after position is in profit by >= 2%
-            gain_pct = ((highest_price - buy_value) / buy_value) * 100
-            if gain_pct >= 2.0 and pd.notna(stop_loss) and stop_loss > 0:
-                # Trail distance = original risk (buy_value - initial stop_loss)
-                original_risk = buy_value - stop_loss
-                if original_risk > 0:
-                    trailing_stop = highest_price - original_risk
-                    if trailing_stop > stop_loss:
-                        logger.info(
-                            f"📈 Trailing stop for {symbol}: {stop_loss:.2f} → {trailing_stop:.2f} "
-                            f"(highest={highest_price:.2f}, gain={gain_pct:.1f}%)"
-                        )
-                        stop_loss = trailing_stop
-                        df_transactions.at[idx, 'stop_loss'] = round(stop_loss, 2)
-
-            stop_hit = pd.notna(stop_loss) and current_price <= stop_loss
-
-            if current_price >= target_price or stop_hit:
-                # Normalize all dates to ISO strings so they sort/serialize consistently
-                sell_date_obj = datetime.today().date()
+            if pos['exit_reason']:
+                sell_date_obj = _today_madrid()
                 buy_date_raw = pd.to_datetime(row['buy_date'], errors='coerce')
                 if pd.isna(buy_date_raw):
                     logger.error(f"❌ Cannot compute days held for {symbol}: invalid buy_date '{row['buy_date']}'. Skipping sale.")
                     continue
-                buy_date = buy_date_raw.date()
-                days_diff = (sell_date_obj - buy_date).days
-
-                # Use the actual exit price: target_price when target hit, stop_loss when stopped out
-                if stop_hit:
-                    exit_price = float(stop_loss)
-                    sell_reason = 'stop_loss'
-                    logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {stop_loss:.2f}")
+                days_diff = (sell_date_obj - buy_date_raw.date()).days
+                exit_price = pos['exit_price']
+                sell_reason = pos['exit_reason']
+                if sell_reason == 'stop_loss':
+                    logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {exit_price:.2f}")
                 else:
-                    # Target hit: use target_price to respect revenue_percentage
-                    exit_price = target_price
-                    sell_reason = 'take_profit'
                     logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
 
                 pct = ((exit_price - buy_value) / buy_value) * 100
@@ -240,12 +241,12 @@ def save_dataframe_file_id(df, file_id):
 
         # Write CSV to an in-memory bytes buffer
         csv_buffer = io.BytesIO()
-        df.to_csv(csv_buffer, index=False)
+        _neutralize_formulas(df).to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)  # Rewind to start
 
         media = MediaIoBaseUpload(csv_buffer, mimetype='text/csv')
 
-        updated_file = service.files().update(
+        service.files().update(
             fileId=file_id,
             media_body=media
         ).execute()

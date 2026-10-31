@@ -20,10 +20,16 @@ SMA50 vs SMA200 + ADX → `TRENDING_UP / TRENDING_DOWN / RANGE / DISTRIBUTION`.
 
 ## Exit mechanics
 
-- Take-profit: `REVENUE_PERCENTAGE`, capped at 3×ATR.
-- Stop-loss: 2×ATR below entry.
-- Trailing stop: activates at +2% gain; distance = original risk (entry − initial stop). **Never moves down.**
-- Backtest adds `max_hold` exit at 30 days.
+Single implementation: `risk_management.update_open_position`, called by both
+production (`google_handler.update_transactions`) and the backtester.
+
+- Take-profit: exit at `buy_value × (1 + REVENUE_PERCENTAGE)`. The stored
+  `take_profit` column (capped at 3×ATR) is only used for the R:R filter.
+- Stop-loss: 2×ATR below entry (`risk_management.stop_loss_atr_mult`).
+- Trailing stop: activates once the highest price is +2% above entry; the stop
+  ratchets to `highest − (buy_value − current stop)`. **Never moves down.**
+- No time exit (`risk_management.max_holding_days: null`). The backtest closes
+  positions still open when data ends as `open_at_end`.
 
 ## Config-driven
 
@@ -35,7 +41,9 @@ deployments without it don't break.
 
 - Trailing stop: loosening (3.5×ATR/+4%) degraded expectancy −0.52pp and PF −0.39
   → reverted. Tightening also hurts (kills +4.99% MFE trades at −1.59%).
-- `step_days=5` doubles signals vs 10 but adds mediocre entries — expected, not a bug.
+- The backtest evaluates daily (`step_days=1`) like production. Older log
+  entries used `step_days=5` + a 30-day max hold + a 2.5×ATR trailing stop
+  and no initial stop — those numbers are not comparable with the current ones.
 - Confidence band 0.6–0.7 underperforms 0.5–0.6 — calibration issue, not fixed.
 - AAPL/V underperform: low volatility can't reach 10% target in 30 days.
   Target-sweep analysis: 8% maximizes global PF (3.40) and avg return (+3.66%).

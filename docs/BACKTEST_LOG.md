@@ -145,3 +145,66 @@ V         6    0.0%  +1.77%   0.58      28d    2.11pp
    signals underperform low-confidence ones. The scoring formula may need
    recalibration, or the risk penalty factor (0.5) may be compressing the
    useful range.
+
+---
+
+## 2026-10-31 — Backtest aligned with the production pipeline (new baseline)
+
+Measurement change, not a strategy change: production signals and exits are
+unchanged. The backtester now replays the production pipeline, so results are
+**not comparable** with earlier entries.
+
+### What changed in the simulation
+
+| | Before | Now (= production) |
+|---|---|---|
+| Evaluation frequency | every 5 days | daily (`step_days=1`) |
+| Initial stop-loss (2×ATR) | not simulated | yes |
+| Trailing stop | 2.5×ATR from max close | `risk_management.update_open_position` (same function production runs) |
+| Target exit price | close of the day | target price (as recorded in the Sheet) |
+| Time exit | 30 days | none (`open_at_end` if data ends) |
+| R:R + confidence filters | no | yes (`MIN_RISK_REWARD_RATIO`, `MIN_BUY_CONFIDENCE`) |
+| Weekly confirmation | mocked off | on |
+| Valuation (yfinance) | network call per step | neutral (no point-in-time data) |
+| Expectancy formula | mixed win definitions (bug) | consistent (= avg return) |
+
+Not replayable offline: LLM audit, news/earnings, correlation filter, valuation, real S&P500 (mocked NEUTRAL).
+
+Parameters: target 10%, min_buy_confidence 0.5, min_risk_reward_ratio 1.2, min_history 250, step_days 1.
+
+### Consolidated
+
+| Metric | Old simulation | Aligned |
+|---|---|---|
+| Trades | 66 | 93 |
+| Target hit rate | 34.8% | 22.6% |
+| Avg return = expectancy | +3.61% (logged as −0.36%) | **+2.08%** |
+| Profit factor | 3.10 | **2.88** |
+| Avg MFE / MAE | +6.72% / −3.82% | +5.11% / −2.30% |
+
+### Per symbol (aligned)
+
+```
+Symbol  BUYs Wins   Win%  AvgRet    PF  System%    B&H%
+MSFT      19    4  21.1%  +1.83%  2.54  +38.10%  +90.36%
+AAPL      13    2  15.4%  +0.92%  1.74  +11.18%  +71.19%
+NVDA      20    4  20.0%  +3.58% 42.59  +99.12% +903.18%
+KO         8    2  25.0%  +1.41%  1.96  +10.67%  +18.72%
+META      21    6  28.6%  +1.87%  2.09  +42.44% +195.90%
+V         12    3  25.0%  +2.08%  2.67  +26.02%  +48.66%
+AMZN       0    -      -       -     -        -   -0.94%
+```
+
+### Exit reasons
+
+```
+Reason         Trades  AvgRet
+target             21  +10.00%
+trailing_stop      47   +1.79%
+stop_loss          25   -4.00%
+```
+
+### Open experiments (not applied)
+
+- Stop fill at market price (`min(stop, price)`) instead of the stop price: avg return +1.24%, PF 1.80. More honest measurement; candidate next baseline.
+- Trailing distance fixed at the initial risk (today it uses `buy_value − current stop`, which freezes the stop near breakeven): avg return +2.26%, target hit 33%, PF 2.52. Mixed; re-test on the honest baseline.

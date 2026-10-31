@@ -53,7 +53,7 @@ Depending on `FORCE_OPINION`:
 |---|---|
 | `DEFAULT` (recommended) | `action` = technical decision (`manual_financial_analysis`); then `apply_audit_veto` downgrades BUY->HOLD if the LLM flagged INCOHERENT |
 | `CUSTOM` | Technical only, no LLM veto |
-| `LLM1` / `LLM2` | Legacy: uses the GPT output directly (not recommended with the current design) |
+| `LLM1` / `LLM2` | Removed: logs a warning and behaves as `DEFAULT` |
 
 ## Step 6 — Minimum confidence filter
 

@@ -1,6 +1,5 @@
 
 import pandas as pd
-from datetime import datetime
 import numpy as np
 import logging
 import yfinance as yf
@@ -66,16 +65,9 @@ def _compute_stochastic_rsi(df, rsi_period=14, stoch_period=14, smooth_k=3, smoo
 
 def _compute_obv(df):
     """Compute On-Balance Volume."""
-    obv = pd.Series(0.0, index=df.index)
-    obv.iloc[0] = df["volume"].iloc[0]
-    for i in range(1, len(df)):
-        if df["close"].iloc[i] > df["close"].iloc[i - 1]:
-            obv.iloc[i] = obv.iloc[i - 1] + df["volume"].iloc[i]
-        elif df["close"].iloc[i] < df["close"].iloc[i - 1]:
-            obv.iloc[i] = obv.iloc[i - 1] - df["volume"].iloc[i]
-        else:
-            obv.iloc[i] = obv.iloc[i - 1]
-    return obv
+    direction = np.sign(df["close"].diff()).fillna(0.0)
+    direction.iloc[0] = 1.0
+    return (direction * df["volume"]).cumsum().astype(float)
 
 
 def _find_swing_highs(series, order=5):
@@ -362,69 +354,22 @@ def _get_valuation_metrics(symbol: str, current_price: float) -> dict:
         }
 
 
-def review_transactions(transactions_df: pd.DataFrame, hist_data: pd.DataFrame, revenue_percentage: float) -> pd.DataFrame:
-    """
-    Reviews open transactions and closes those that meet or exceed the required revenue percentage.
-
-    Parameters:
-        transactions_df (pd.DataFrame): DataFrame of transactions with columns like 'symbol', 'buy_date', 'buy_price', etc.
-        hist_data (pd.DataFrame): DataFrame with symbols and current prices (columns: 'symbol', 'current_price').
-        revenue_percentage (float): Minimum profit percentage to trigger a sale.
-
-    Returns:
-        pd.DataFrame: Rows of transactions that were updated (i.e., sold).
-    """
-
-    # Ensure date columns are parsed correctly
-    transactions_df['buy_date'] = pd.to_datetime(transactions_df['buy_date'], errors='coerce')
-    transactions_df['sell_date'] = pd.to_datetime(transactions_df['sell_date'], errors='coerce')
-
-    updated_rows = []
-
-    for _, row in hist_data.iterrows():
-        symbol = row['symbol']
-        try:
-            current_price = float(row['current_price'])
-        except ValueError:
-            continue  # Skip rows with invalid price
-
-        # Find the first open (unsold) transaction for the symbol
-        open_tx = transactions_df[
-            (transactions_df['symbol'] == symbol) & (transactions_df['sell_date'].isna())
-        ]
-
-        if open_tx.empty:
-            continue
-
-        idx = open_tx.index[0]
-
-        buy_price = pd.to_numeric(transactions_df.at[idx, 'buy_price'], errors='coerce')
-        if pd.isna(buy_price):
-            continue
-
-        # Calculate profit percentage
-        percentage_benefit = ((current_price - buy_price) / buy_price) * 100
-
-        if percentage_benefit < revenue_percentage:
-            continue
-
-        # Close the transaction (register sale)
-        sell_date = datetime.today()
-        transactions_df.loc[idx, 'sell_date'] = sell_date.strftime('%Y-%m-%d')
-        transactions_df.loc[idx, 'sell_value'] = current_price
-        transactions_df.loc[idx, 'buy_sell_days_diff'] = (sell_date - transactions_df.at[idx, 'buy_date']).days
-        transactions_df.loc[idx, 'percentage_benefit'] = round(percentage_benefit, 2)
-
-        updated_rows.append(transactions_df.loc[idx])
-
-    return pd.DataFrame(updated_rows)
+NEUTRAL_VALUATION = {
+    "pe_ratio": None, "forward_pe": None, "book_value": None, "price_to_book": None,
+    "market_cap": None, "valuation_adjustment": 0.0, "valuation_reasons": "not evaluated",
+}
 
 
-def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, sp500_override=None) -> dict:
+def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, sp500_override=None,
+                          valuation_override=None) -> dict:
     """
     Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators,
     historical volatility, monthly returns, breakouts, and momentum.
     Returns all numeric values as native Python floats rounded to 4 decimals.
+
+    sp500_override / valuation_override skip the network fetches (used to share one
+    S&P500 fetch across symbols, and by the backtester, which has no point-in-time
+    fundamentals).
     """
 
     logger.info(f"Evaluating buy interest for: {symbol}")
@@ -551,7 +496,7 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, s
         # -------------------------
         # NEW: Fundamental valuation metrics
         # -------------------------
-        valuation = _get_valuation_metrics(symbol, current_price)
+        valuation = valuation_override if valuation_override is not None else _get_valuation_metrics(symbol, current_price)
 
         # -------------------------
         # Extract latest and previous

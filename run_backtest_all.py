@@ -1,14 +1,23 @@
 """
 Run backtesting across all historical data CSVs in resources/historicals/.
 Handles both Yahoo Finance and NASDAQ CSV formats.
+
+Defaults replay the production pipeline: parameters come from the "backtest"
+section of resources/technical_config.json, overridden by the same env vars
+production reads (REVENUE_PERCENTAGE, MIN_BUY_CONFIDENCE, MIN_RISK_REWARD_RATIO).
+CLI flags exist only for experiments.
 """
+import argparse
 import os
 import sys
 import pandas as pd
 import logging
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
 from unittest.mock import patch
 
-from tools.backtesting import run_backtest, format_backtest_report
+from tools import technical_engine
+from tools.backtesting import run_backtest, format_backtest_report, EXIT_REASONS
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -50,7 +59,7 @@ def load_and_normalize_csv(filepath):
     else:
         # Yahoo Finance format: date, open, high, low, close, volume, ...
         df.columns = df.columns.str.lower()
-        df["date"] = pd.to_datetime(df["date"])
+        df["date"] = pd.to_datetime(df["date"], utc=True)
 
     # Keep only needed columns
     df = df[["date", "open", "high", "low", "close", "volume"]].copy()
@@ -59,34 +68,70 @@ def load_and_normalize_csv(filepath):
     return df
 
 
-@patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
-@patch("tools.custom_financial_calc._get_sp500_trend", return_value=("NEUTRAL", 0.0))
-def run_all_backtests(mock_sp500, mock_weekly):
-    """Run backtests on all CSV files and print a summary."""
-    all_results = []
+def resolve_params(args=None):
+    """Backtest parameters: CLI flag > production env var > config default."""
+    cfg = technical_engine.load_config().get("backtest", {})
+    rules = technical_engine.load_config().get("risk_management", {})
 
+    def pick(cli, env, key, cast=float):
+        if cli is not None:
+            return cli
+        if os.environ.get(env):
+            return cast(os.environ[env])
+        return cfg.get(key)
+
+    args = args or argparse.Namespace()
+    params = {
+        "target_profit_pct": pick(getattr(args, "target", None), "REVENUE_PERCENTAGE", "target_profit_pct"),
+        "min_buy_confidence": pick(getattr(args, "min_conf", None), "MIN_BUY_CONFIDENCE", "min_buy_confidence"),
+        "min_risk_reward_ratio": pick(getattr(args, "min_rr", None), "MIN_RISK_REWARD_RATIO", "min_risk_reward_ratio"),
+        "min_history": int(cfg.get("min_history", 250)),
+        "step_days": getattr(args, "step_days", None) or int(cfg.get("step_days", 1)),
+        "max_holding_days": getattr(args, "max_hold", None) or rules.get("max_holding_days"),
+    }
+    # The engine's BUY threshold reads MIN_BUY_CONFIDENCE too: pin it so the run is reproducible
+    os.environ["MIN_BUY_CONFIDENCE"] = str(params["min_buy_confidence"])
+    return params
+
+
+def _backtest_symbol(filename, symbol, params, weekly):
+    """Worker: one symbol per process (symbols are independent, results identical to serial)."""
+    logging.basicConfig(level=logging.WARNING)
+    os.environ["MIN_BUY_CONFIDENCE"] = str(params["min_buy_confidence"])
+    df = load_and_normalize_csv(os.path.join(HIST_DIR, filename))
+    header = f"\n🔄 Backtest for {symbol}: {len(df)} rows ({df['date'].min().date()} to {df['date'].max().date()})"
+    weekly_ctx = nullcontext() if weekly else patch(
+        "tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
+    with weekly_ctx:
+        results = run_backtest(df, symbol, **params)
+    return header, results
+
+
+def run_all_backtests(params=None, weekly=True, workers=None):
+    """Run backtests on all CSV files (in parallel) and print a summary."""
+    params = params or resolve_params()
+    print("Parameters: " + ", ".join(f"{k}={v}" for k, v in params.items()) + f", weekly={weekly}")
+    jobs = []
     for filename, symbol in FILE_SYMBOL_MAP.items():
-        filepath = os.path.join(HIST_DIR, filename)
-        if not os.path.exists(filepath):
+        if not os.path.exists(os.path.join(HIST_DIR, filename)):
             print(f"⚠️  Skipping {symbol}: {filename} not found")
             continue
+        jobs.append((filename, symbol))
 
-        print(f"\n🔄 Running backtest for {symbol}...")
-        df = load_and_normalize_csv(filepath)
-        print(f"   Loaded {len(df)} rows ({df['date'].min().date()} to {df['date'].max().date()})")
+    with ProcessPoolExecutor(max_workers=workers or min(len(jobs), os.cpu_count() or 1)) as pool:
+        futures = [pool.submit(_backtest_symbol, f, s, params, weekly) for f, s in jobs]
+        outputs = [f.result() for f in futures]
 
-        results = run_backtest(
-            df, symbol,
-            target_profit_pct=10.0,
-            max_holding_days=30,
-            min_history=250,
-            step_days=5,
-        )
-
-        all_results.append(results)
+    all_results = []
+    for header, results in outputs:
+        print(header)
         print(format_backtest_report(results))
+        all_results.append(results)
+    _print_summary(all_results)
+    return all_results
 
-    # Print summary table
+
+def _print_summary(all_results):
     if all_results:
         print("\n")
         print("=" * 100)
@@ -134,7 +179,8 @@ def run_all_backtests(mock_sp500, mock_weekly):
             gp = float(w["actual_return_pct"].sum()) if len(w) > 0 else 0
             gl = abs(float(l["actual_return_pct"].sum())) if len(l) > 0 else 0
             pf_t = gp / gl if gl > 0 else float("inf")
-            exp_t = overall_wr * avg_w + (1 - overall_wr) * avg_l
+            pos_rate = len(w) / len(all_df)
+            exp_t = pos_rate * avg_w + (1 - pos_rate) * avg_l
             mfe_t = float(all_df["mfe_pct"].mean())
             mae_t = float(all_df["mae_pct"].mean())
             pf_str = f"{pf_t:.2f}" if pf_t != float("inf") else "inf"
@@ -187,7 +233,7 @@ def run_all_backtests(mock_sp500, mock_weekly):
             print(f"\n  Timing (average day of MFE/MAE by exit reason):")
             print(f"  {'Exit reason':>15} {'Trades':>7} {'DayMFE':>8} {'DayMAE':>8} {'AvgMFE':>8} {'AvgMAE':>8} {'AvgRet':>8}")
             print(f"  {'-'*65}")
-            for reason in ["target", "trailing_stop", "max_hold"]:
+            for reason in EXIT_REASONS:
                 subset = all_df[all_df["exit_reason"] == reason]
                 if len(subset) == 0:
                     continue
@@ -210,4 +256,14 @@ def run_all_backtests(mock_sp500, mock_weekly):
 
 
 if __name__ == "__main__":
-    run_all_backtests()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description="Production-aligned backtest over resources/historicals")
+    ap.add_argument("--target", type=float, help="take-profit %% (default: REVENUE_PERCENTAGE / config)")
+    ap.add_argument("--min-conf", type=float, help="MIN_BUY_CONFIDENCE override")
+    ap.add_argument("--min-rr", type=float, help="MIN_RISK_REWARD_RATIO override (0 disables)")
+    ap.add_argument("--step-days", type=int, help="evaluate every N days (production: 1)")
+    ap.add_argument("--max-hold", type=int, help="experimental time exit in trading days (production: none)")
+    ap.add_argument("--no-weekly", action="store_true", help="disable weekly confirmation (legacy behaviour)")
+    cli = ap.parse_args()
+    run_all_backtests(resolve_params(cli), weekly=not cli.no_weekly)

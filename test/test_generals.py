@@ -7,124 +7,14 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
 # Import all the necessary functions from your script
 from general import (
-    extract_trading_view_decision,
-    extract_llm_decision,
-    extract_llm_confidence,
     extract_custom_decision,
-    extract_custom_confidence,
     apply_audit_veto,
-    decide_final_action,
     generate_action_column,
-    add_urls_column
+    add_urls_column,
+    is_us_market_day,
+    nyse_holidays,
+    SecretRedactingFilter,
 )
-
-# Sample test data
-test_data = {
-    'symbol': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'],
-    'llm_2_opinion': [
-        'SELL - Price is below moving averages.',     # SELL
-        'BUY - All indicators show upward movement.',      # BUY
-        'SELL - Price is below moving averages.',       # SELL (tie, picks first)
-        'BUY - All indicators show upward movement.',     # BUY
-        'EMPTY_DECISION - Sideways market, no clear signal.',     # NEUTRAL
-    ],
-    'llm_opinion': [
-        'SELL - Price is below moving averages.',
-        'BUY - All indicators show upward movement.',
-        'EMPTY_DECISION - No strong signals detected.',
-        'SELL - Momentum weakening, risk of reversal.',
-        'EMPTY_DECISION - Sideways market, no clear signal.',
-    ]
-}
-
-# Test: extract_trading_view_decision
-def test_extract_trading_view_decision():
-    assert extract_trading_view_decision('SELL (9) - Neutral (8) - Buy (7)') == 'SELL'
-    assert extract_trading_view_decision('SELL (6) - NEUTRAL (8) - BUY (9)') == 'BUY'
-    assert extract_trading_view_decision('SELL (8) - NEUTRAL (8) - BUY (8)') == 'SELL'
-    assert extract_trading_view_decision('BUY (10) - Neutral (5) - SELL (2)') == 'BUY'
-    assert extract_trading_view_decision('NEUTRAL (9) - SELL (5) - BUY (5)') == 'NEUTRAL'
-    assert extract_trading_view_decision('Invalid string with no numbers') is None
-    assert extract_trading_view_decision('') is None
-    assert extract_trading_view_decision(None) == "error"
-
-# Test: extract_llm_decision
-def test_extract_llm_decision():
-    # Old format: "DECISION - explanation"
-    assert extract_llm_decision('sell - Something something') == 'SELL'
-    assert extract_llm_decision('buy - More text here') == 'BUY'
-    assert extract_llm_decision('SELL- No space') == 'SELL'
-    assert extract_llm_decision('   buy -  Extra spaces   ') == 'BUY'
-    # New format: "75% BUY - explanation"
-    assert extract_llm_decision('75% BUY - Strong momentum') == 'BUY'
-    assert extract_llm_decision('30% SELL - Bearish trend') == 'SELL'
-    assert extract_llm_decision('50% HOLD - Mixed signals') == 'HOLD'
-    # Edge cases
-    assert extract_llm_decision(None) is None
-    assert extract_llm_decision('') == 'EMPTY_DECISION'
-    assert extract_llm_decision('neutral - Sideways') == 'EMPTY_DECISION'
-
-
-# Test: extract_llm_confidence
-def test_extract_llm_confidence():
-    assert extract_llm_confidence('75% BUY - Strong momentum') == 0.75
-    assert extract_llm_confidence('30% SELL - Bearish trend') == 0.30
-    assert extract_llm_confidence('100% BUY - All signals aligned') == 1.0
-    assert extract_llm_confidence('0% HOLD - No conviction') == 0.0
-    # Old format without confidence → default 0.5
-    assert extract_llm_confidence('BUY - Strong momentum') == 0.5
-    assert extract_llm_confidence(None) == 0.5
-    assert extract_llm_confidence('') == 0.5
-
-
-# Test: decide_final_action
-def test_decide_final_action():
-    # Both equal
-    assert decide_final_action('BUY', 'BUY') == 'BUY'
-    assert decide_final_action('SELL', 'SELL') == 'SELL'
-    assert decide_final_action('HOLD', 'HOLD') == 'HOLD'
-
-    # One is None or error — single valid LLM, no custom
-    assert decide_final_action(None, 'BUY') == 'BUY'
-    assert decide_final_action('SELL', None) == 'SELL'
-    assert decide_final_action('error', 'HOLD') == 'HOLD'
-    assert decide_final_action('BUY', 'error') == 'BUY'
-    assert decide_final_action(None, 'error') == 'EMPTY_DECISION'
-    assert decide_final_action('error', None) == 'EMPTY_DECISION'
-
-    # Both different and valid — conservative logic
-    assert decide_final_action('BUY', 'SELL') == 'HOLD'   # BUY vs SELL → conservative HOLD
-    assert decide_final_action('SELL', 'HOLD') == 'SELL'   # SELL vs HOLD → risk mgmt SELL
-    assert decide_final_action('HOLD', 'BUY') == 'HOLD'    # HOLD vs BUY → conservative HOLD
-
-    # Both None or error
-    assert decide_final_action(None, None) == 'EMPTY_DECISION'
-    assert decide_final_action('error', 'error') == 'EMPTY_DECISION'
-    assert decide_final_action(None, 'error') == 'EMPTY_DECISION'
-
-
-def test_decide_final_action_with_custom_tiebreaker():
-    # Custom breaks tie when LLMs disagree
-    assert decide_final_action('BUY', 'SELL', custom_decision='BUY') == 'BUY'
-    assert decide_final_action('BUY', 'SELL', custom_decision='SELL') == 'SELL'
-    assert decide_final_action('BUY', 'HOLD', custom_decision='HOLD') == 'HOLD'
-    assert decide_final_action('SELL', 'HOLD', custom_decision='SELL') == 'SELL'
-
-    # Custom disagrees with both LLMs: use custom only if high confidence
-    assert decide_final_action('BUY', 'HOLD', custom_decision='SELL', custom_confidence=0.5) == 'SELL'
-    assert decide_final_action('BUY', 'HOLD', custom_decision='SELL', custom_confidence=0.2) == 'HOLD'
-
-    # No valid LLMs, fall back to custom
-    assert decide_final_action(None, 'error', custom_decision='BUY') == 'BUY'
-    assert decide_final_action('error', None, custom_decision='SELL') == 'SELL'
-
-    # Single LLM + custom disagree → conservative HOLD
-    assert decide_final_action('BUY', None, custom_decision='SELL') == 'HOLD'
-    # Single LLM + custom agree on SELL → SELL
-    assert decide_final_action('SELL', None, custom_decision='SELL') == 'SELL'
-
-
-
 
 # Test: generate_action_column (DEFAULT = technical decides, LLM only audits BUY)
 def test_generate_action_column_default():
@@ -150,16 +40,6 @@ def test_generate_action_column_default():
     for i, exp in enumerate(expected):
         assert df_result.loc[i, 'action'] == exp, f"[DEFAULT] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
 
-# Test: extract_custom_confidence
-def test_extract_custom_confidence():
-    assert extract_custom_confidence('0.45 BUY') == 0.45
-    assert extract_custom_confidence('-0.30 SELL') == -0.30
-    assert extract_custom_confidence('0.00 HOLD') == 0.0
-    assert extract_custom_confidence(None) == 0.0
-    assert extract_custom_confidence('invalid') == 0.0
-    assert extract_custom_confidence(123) == 0.0
-
-
 # Test: apply_audit_veto (LLM may ONLY downgrade a technical BUY to HOLD on INCOHERENT)
 def test_apply_audit_veto():
     # Technical BUY + INCOHERENT audit → HOLD (veto)
@@ -179,15 +59,24 @@ def test_apply_audit_veto():
     assert apply_audit_veto('BUY', '') == 'BUY'
 
 
-# Test: generate_action_column with force_opinion = LLM1 (GPT only, no consensus)
-def test_generate_action_column_force_llm():
-    df_test = pd.DataFrame(test_data)
-    df_result = generate_action_column(df_test.copy(), opinion_type="LLM1")
-
-    # LLM1 = GPT only, ignores technical analysis
-    expected = ['SELL', 'BUY', 'EMPTY_DECISION', 'SELL', 'EMPTY_DECISION']
-    for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'action'] == exp, f"[LLM1] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
+# Test: legacy LLM1/LLM2 modes fall back to DEFAULT (technical decides, audit veto applies)
+def test_generate_action_column_legacy_llm_modes_fall_back_to_default():
+    df_test = pd.DataFrame({
+        'symbol': ['A', 'B', 'C'],
+        'llm_opinion': [
+            'COHERENT | adj=+0.05 | aligned',
+            'INCOHERENT | adj=-0.30 | divergence',
+            'HOLD - LLM not called (technical decides)',
+        ],
+        'manual_financial_analysis': [
+            '0.60 BUY | regime=TRENDING_UP',
+            '0.55 BUY | regime=TRENDING_UP',
+            '0.10 HOLD | regime=RANGE',
+        ],
+    })
+    for mode in ("LLM1", "LLM2"):
+        df_result = generate_action_column(df_test.copy(), opinion_type=mode)
+        assert list(df_result['action']) == ['BUY', 'HOLD', 'HOLD'], mode
 
 
 # Test: DEFAULT — technical engine is the sole decider; the LLM cannot create a BUY
@@ -229,15 +118,6 @@ def test_generate_action_column_default_technical_decides():
         got = df_result.loc[i, 'action']
         assert got == exp, f"[DEFAULT technical-decides] {symbol}: expected {exp}, got {got}"
 
-# Test: generate_action_column with force_opinion = LLM2
-def test_generate_action_column_force_llm_2():
-    df_test = pd.DataFrame(test_data)
-    df_result = generate_action_column(df_test.copy(), opinion_type="LLM2")
-
-    expected = ['SELL', 'BUY', 'SELL', 'BUY', 'EMPTY_DECISION']
-    for i, exp in enumerate(expected):
-        assert df_result.loc[i, 'action'] == exp, f"[LLM2] Index {i}: expected {exp}, got {df_result.loc[i, 'action']}"
-
 def test_add_urls_column_builds_tradingview_urls_correctly():
     # Arrange: create a sample buy DataFrame
     buy_df = pd.DataFrame({
@@ -273,3 +153,37 @@ def test_add_urls_column_builds_tradingview_urls_correctly():
     # Assert: unknown or invalid symbols return "NOT FOUND"
     assert result_df.loc[3, "tradingview_url"] == "NOT FOUND"
     assert result_df.loc[4, "tradingview_url"] == "NOT FOUND"
+
+
+def test_nyse_holidays_2026():
+    from datetime import date
+    assert nyse_holidays(2026) == {
+        date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3),
+        date(2026, 5, 25), date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7),
+        date(2026, 11, 26), date(2026, 12, 25),
+    }
+
+
+def test_new_year_on_saturday_is_not_observed_on_friday():
+    from datetime import date
+    # 2022-01-01 was a Saturday: NYSE stayed open on Friday 2021-12-31
+    assert is_us_market_day(date(2021, 12, 31)) is True
+    assert date(2021, 12, 31) not in nyse_holidays(2021)
+
+
+def test_floating_holidays_are_closed():
+    from datetime import date
+    assert is_us_market_day(date(2025, 11, 27)) is False  # Thanksgiving
+    assert is_us_market_day(date(2025, 4, 18)) is False   # Good Friday
+    assert is_us_market_day(date(2025, 11, 28)) is True   # day after Thanksgiving (half day)
+
+
+def test_secret_redacting_filter_masks_env_secrets(monkeypatch):
+    import logging
+    monkeypatch.setenv("FINNHUB_API_KEY", "supersecretkey123")
+    record = logging.LogRecord("x", logging.ERROR, __file__, 1,
+                               "HTTP error for url: https://finnhub.io/api/v1/quote?symbol=%s&token=supersecretkey123",
+                               ("AAPL",), None)
+    assert SecretRedactingFilter().filter(record) is True
+    assert "supersecretkey123" not in record.getMessage()
+    assert "AAPL" in record.getMessage()

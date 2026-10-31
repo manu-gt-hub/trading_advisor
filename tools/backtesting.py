@@ -1,31 +1,44 @@
 import pandas as pd
 import numpy as np
 import logging
-from tools.custom_financial_calc import evaluate_buy_interest
+from tools.custom_financial_calc import evaluate_buy_interest, NEUTRAL_VALUATION
+from tools.risk_management import compute_stop_loss_take_profit, update_open_position
+
+EXIT_REASONS = ["target", "trailing_stop", "stop_loss", "max_hold", "open_at_end"]
 
 logger = logging.getLogger(__name__)
 
 
-def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
-                 min_history=250, step_days=5, sp500_mock=("NEUTRAL", 0.0),
-                 min_buy_confidence=None):
+def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
+                 min_history=250, step_days=1, sp500_mock=("NEUTRAL", 0.0),
+                 min_buy_confidence=None, min_risk_reward_ratio=None):
     """
-    Backtest the technical analysis signals over historical data.
+    Backtest the technical analysis signals over historical data, replaying the
+    production pipeline day by day:
 
-    For each evaluation day (starting after min_history rows), runs evaluate_buy_interest
-    using only data available up to that day. If the signal is BUY, checks whether the
-    stock hits the target_profit_pct within max_holding_days trading days.
+      1. evaluate_buy_interest on data up to day i (no look-ahead)  -> BUY?
+      2. confidence filter (MIN_BUY_CONFIDENCE)
+      3. open-position filter (one position per symbol; no buy on the exit day)
+      4. risk/reward filter (MIN_RISK_REWARD_RATIO, ATR stop / capped target)
+      5. entry at close of day i with the ATR stop-loss production stores
+      6. each following day: risk_management.update_open_position (the exact
+         function production runs) -> trailing stop, stop-loss, take-profit
+
+    Not replayable offline (documented gaps): LLM audit, news/earnings filter,
+    cross-symbol correlation filter, valuation adjustment, real S&P500 context.
 
     Parameters:
         df (pd.DataFrame): Full historical data with columns: date, open, high, low, close, volume.
         symbol (str): Stock ticker symbol.
-        target_profit_pct (float): Profit target in % (e.g., 10.0 means +10%).
-        max_holding_days (int): Max trading days to hold a BUY position.
+        target_profit_pct (float): Take-profit in % (production: REVENUE_PERCENTAGE).
+        max_holding_days (int, optional): Time exit after N trading days. None = production
+            behaviour (no time exit); positions still open when data ends are closed at the
+            last close with exit_reason 'open_at_end'.
         min_history (int): Minimum rows of history before starting to evaluate.
-        step_days (int): Evaluate every N days to speed up backtesting.
+        step_days (int): Evaluate every N days (production evaluates daily: 1).
         sp500_mock (tuple): Mock S&P500 trend to avoid external calls (trend, score).
-        min_buy_confidence (float, optional): Minimum confidence to accept a BUY signal.
-            Mirrors the MIN_BUY_CONFIDENCE filter used in production. If None, all BUYs pass.
+        min_buy_confidence (float, optional): Post-engine confidence filter. None = off.
+        min_risk_reward_ratio (float, optional): R:R filter. None = off.
 
     Returns:
         dict with backtest results including trades, win rate, avg return, etc.
@@ -38,21 +51,15 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
     df["low"] = pd.to_numeric(df.get("low", df["close"]), errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
 
-    # Precompute ATR for trailing stop
-    tr1 = df["high"] - df["low"]
-    tr2 = (df["high"] - df["close"].shift(1)).abs()
-    tr3 = (df["low"] - df["close"].shift(1)).abs()
-    df["atr_14"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean()
-
     trades = []
     total_signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "EVALUATION_FAILED": 0}
     filtered_by_confidence = 0
-    # Track the end index of the last open trade to prevent overlapping positions.
-    # A new trade can only start after the previous one has exited.
+    filtered_by_rr = 0
+    # Index of the exit day of the last trade: like production, a new BUY is only
+    # possible from the day after the position closed.
     last_trade_exit_idx = -1
 
-    for i in range(min_history, len(df) - max_holding_days, step_days):
-        # Skip if a previous trade is still open (no overlapping positions)
+    for i in range(min_history, len(df) - 1, step_days):
         if i <= last_trade_exit_idx:
             continue
 
@@ -63,7 +70,8 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
 
         try:
             result = evaluate_buy_interest(symbol, hist_slice, entry_price,
-                                           sp500_override=sp500_mock)
+                                           sp500_override=sp500_mock,
+                                           valuation_override=NEUTRAL_VALUATION)
         except Exception as e:
             logger.warning(f"Backtest eval failed at index {i}: {e}")
             continue
@@ -75,36 +83,41 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         if decision != "BUY":
             continue
 
-        # Apply min_buy_confidence filter (mirrors production)
         if min_buy_confidence is not None and confidence < min_buy_confidence:
             filtered_by_confidence += 1
             continue
 
-        # Track the BUY trade outcome
-        future = df.iloc[i + 1: i + 1 + max_holding_days]
+        levels = compute_stop_loss_take_profit(
+            entry_price, result["signals"].get("ATR_14"), revenue_percentage=target_profit_pct
+        )
+        rr = levels["risk_reward_ratio"]
+        if min_risk_reward_ratio is not None and rr is not None and rr < min_risk_reward_ratio:
+            filtered_by_rr += 1
+            continue
+
+        future = df.iloc[i + 1:]
+        if max_holding_days:
+            future = future.iloc[:max_holding_days]
         if future.empty:
             continue
 
-        # Compute ATR at entry for trailing stop
-        atr_at_entry = float(df.iloc[i].get("atr_14", 0)) if pd.notna(df.iloc[i].get("atr_14")) else 0
-        trailing_stop_distance = 2.5 * atr_at_entry if atr_at_entry > 0 else None
-        # Only activate trailing stop after price is 2% above entry (avoid cutting early)
-        trailing_activation_pct = 2.0
+        initial_stop = levels["stop_loss"]
+        stop_loss = initial_stop
+        highest_price = np.nan
+        target_price = entry_price * (1 + target_profit_pct / 100)
 
-        # Simulate trade with trailing stop + target exit
         max_price_seen = entry_price
         min_price_seen = entry_price
-        exit_price = float(future.iloc[-1]["close"])  # default: exit at end
-        exit_reason = "max_hold"
+        exit_price = float(future.iloc[-1]["close"])
+        exit_reason = "max_hold" if max_holding_days and len(future) == max_holding_days else "open_at_end"
         days_held = len(future)
         hit_target = False
         days_to_target = None
-        day_of_mfe = 0  # day when MFE was reached
-        day_of_mae = 0  # day when MAE was reached
-        gain_at_trailing_trigger = None  # gain% when trailing stop was activated
+        day_of_mfe = 0
+        day_of_mae = 0
+        gain_at_trailing_trigger = None
 
-        for j, (_, row) in enumerate(future.iterrows(), 1):
-            close = float(row["close"])
+        for j, close in enumerate(future["close"].astype(float), 1):
             if close > max_price_seen:
                 max_price_seen = close
                 day_of_mfe = j
@@ -112,28 +125,24 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
                 min_price_seen = close
                 day_of_mae = j
 
-            # Check target hit
-            pct_from_entry = ((close - entry_price) / entry_price) * 100
-            if pct_from_entry >= target_profit_pct:
-                exit_price = close
+            pos = update_open_position(entry_price, stop_loss, highest_price, close, target_price)
+            highest_price, stop_loss = pos["highest_price"], pos["stop_loss"]
+            if pos["exit_reason"] is None:
+                continue
+
+            exit_price = pos["exit_price"]
+            days_held = j
+            if pos["exit_reason"] == "take_profit":
                 exit_reason = "target"
-                days_held = j
                 hit_target = True
                 days_to_target = j
-                break
-
-            # Check trailing stop (only active once trade is in profit)
-            max_gain_pct = ((max_price_seen - entry_price) / entry_price) * 100
-            if (trailing_stop_distance
-                    and max_gain_pct >= trailing_activation_pct
-                    and max_price_seen - close >= trailing_stop_distance):
-                gain_at_trailing_trigger = round(pct_from_entry, 2)
-                exit_price = close
+            elif initial_stop is not None and stop_loss > initial_stop:
                 exit_reason = "trailing_stop"
-                days_held = j
-                break
+                gain_at_trailing_trigger = round(((close - entry_price) / entry_price) * 100, 2)
+            else:
+                exit_reason = "stop_loss"
+            break
 
-        # Mark trade exit index so the next trade doesn't overlap
         last_trade_exit_idx = i + days_held
 
         # MAE/MFE metrics
@@ -145,6 +154,7 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             "entry_date": entry_date,
             "entry_price": round(entry_price, 2),
             "confidence": round(confidence, 2),
+            "risk_reward_ratio": rr,
             "mfe_pct": round(mfe_pct, 2),
             "mae_pct": round(mae_pct, 2),
             "day_of_mfe": day_of_mfe,
@@ -170,6 +180,7 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
             "total_signals": total_signals,
             "total_buy_signals": 0,
             "filtered_by_confidence": filtered_by_confidence,
+            "filtered_by_rr": filtered_by_rr,
             "min_buy_confidence": min_buy_confidence,
             "trades": [],
             "benchmark_buy_hold_pct": round(bh_return_pct, 2),
@@ -195,7 +206,10 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
     gross_profit = float(winners["actual_return_pct"].sum()) if len(winners) > 0 else 0.0
     gross_loss = abs(float(losers["actual_return_pct"].sum())) if len(losers) > 0 else 0.0
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
-    expectancy = (win_rate * avg_win) + ((1 - win_rate) * avg_loss)
+    # Expectancy must use the same win definition as avg_win/avg_loss (return > 0);
+    # win_rate counts target hits only.
+    positive_rate = len(winners) / total
+    expectancy = (positive_rate * avg_win) + ((1 - positive_rate) * avg_loss)
 
     # MAE/MFE summary
     avg_mfe = float(trades_df["mfe_pct"].mean())
@@ -212,6 +226,7 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=30,
         "wins": int(wins),
         "losses": total - int(wins),
         "filtered_by_confidence": filtered_by_confidence,
+        "filtered_by_rr": filtered_by_rr,
         "min_buy_confidence": min_buy_confidence,
         "win_rate": round(win_rate, 4),
         "avg_max_return_pct": round(trades_df["max_return_pct"].mean(), 2),
@@ -250,11 +265,12 @@ def format_backtest_report(results):
         f"  BACKTEST REPORT: {results['symbol']}",
         f"═══════════════════════════════════════════",
         f"  Target profit:     {results['target_profit_pct']}%",
-        f"  Max holding:       {results['max_holding_days']} trading days",
+        f"  Max holding:       " + (f"{results['max_holding_days']} trading days" if results['max_holding_days'] else "none (production)"),
         f"  Min confidence:    {min_conf if min_conf is not None else 'OFF'}",
         f"───────────────────────────────────────────",
         f"  Signal distribution: {results['total_signals']}",
-        f"  BUY signals:       {results['total_buy_signals']}" + (f" ({filtered} filtered by confidence)" if filtered else ""),
+        f"  BUY signals:       {results['total_buy_signals']}" + (f" ({filtered} filtered by confidence)" if filtered else "")
+        + (f" ({results['filtered_by_rr']} filtered by R:R)" if results.get('filtered_by_rr') else ""),
         f"  Wins (hit target): {results['wins']}",
         f"  Losses:            {results['losses']}",
         f"  WIN RATE:          {results['win_rate']:.1%}",

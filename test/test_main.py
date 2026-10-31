@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Use importorskip so tests are skipped cleanly when the package is missing,
 # but in CI (where google-auth is installed) the real functions are tested.
 try:
-    from main import filter_buys_by_confidence, filter_buys_by_risk_reward, _is_market_day
+    from main import filter_buys_by_confidence, filter_buys_by_risk_reward, _is_market_day, build_transactions_log
 except ImportError:
     pytest.skip("main.py dependencies not installed (google-auth)", allow_module_level=True)
 
@@ -195,29 +195,8 @@ _EXPECTED_COL_ORDER = [
 
 
 def _build_transactions_log(trans_updated_df, buy_df, max_records=100):
-    """
-    Replicate the exact pipeline from update_and_save_transactions() in main.py
-    so we can validate the DataFrame that would be saved to Google Drive.
-    """
-    tx_cols = [
-        'symbol', 'buy_value', 'buy_date', 'stop_loss', 'take_profit',
-        'risk_reward_ratio', 'tradingview_url',
-    ]
-    buy_for_tx = buy_df[[c for c in tx_cols if c in buy_df.columns]].copy()
-
-    final_df = pd.concat([trans_updated_df, buy_for_tx], ignore_index=True)
-
-    if 'buy_date' in final_df.columns:
-        final_df['buy_date'] = final_df['buy_date'].astype(str).replace('NaT', '')
-
-    final_df = final_df.sort_values(by='buy_date', ascending=False).head(max_records)
-
-    desired_order = list(_EXPECTED_COL_ORDER)
-    ordered_cols = [c for c in desired_order if c in final_df.columns]
-    extra_cols = [c for c in final_df.columns if c not in desired_order]
-    final_df = final_df[ordered_cols + extra_cols]
-
-    return final_df
+    """The real pipeline from main.py that produces the log saved to Google Drive."""
+    return build_transactions_log(trans_updated_df, buy_df, max_records)
 
 
 class TestTransactionsLogOutput:
@@ -592,3 +571,25 @@ class TestTransactionsLogOutput:
         assert tsla['percentage_benefit'] >= self.REVENUE_PCT, (
             f"percentage_benefit={tsla['percentage_benefit']} should be >= {self.REVENUE_PCT}%"
         )
+
+
+class TestTransactionsLogRetention:
+
+    def _row(self, symbol, buy_date, sold):
+        return {
+            'symbol': symbol, 'buy_value': 100.0, 'buy_date': buy_date,
+            'sell_value': 110.0 if sold else None, 'sell_date': '2026-01-01' if sold else None,
+        }
+
+    def test_old_open_position_survives_max_records_cap(self):
+        rows = [self._row('OLD', '2025-01-02 18:00', sold=False)]
+        rows += [self._row(f'S{i}', f'2026-02-{i + 1:02d} 18:00', sold=True) for i in range(5)]
+        final = build_transactions_log(pd.DataFrame(rows), pd.DataFrame(), max_records=3)
+        assert 'OLD' in set(final['symbol'])
+        assert len(final) == 4
+        assert list(final['symbol'][:3]) == ['S4', 'S3', 'S2']
+
+    def test_sort_uses_dates_not_strings(self):
+        rows = [self._row('A', '2026-09-05', sold=True), self._row('B', '2026-10-01 09:00', sold=True)]
+        final = build_transactions_log(pd.DataFrame(rows), pd.DataFrame(), max_records=10)
+        assert list(final['symbol']) == ['B', 'A']

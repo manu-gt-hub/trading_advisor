@@ -22,6 +22,12 @@ current_dir = os.path.dirname(__file__)
 path = os.path.join(current_dir, '..', '.env')
 env_path = os.path.abspath(path)
 
+_REAL_DRIVE = pytest.mark.skipif(
+    not (os.environ.get("GDRIVE_CREDENTIALS_JSON") or dotenv_values(env_path).get("GDRIVE_CREDENTIALS_JSON")),
+    reason="integration test: needs real GDRIVE_CREDENTIALS_JSON",
+)
+
+@_REAL_DRIVE
 def test_get_drive_service_real():
     """
     Real test connecting to Google Drive service using real credentials from .env.
@@ -44,6 +50,7 @@ def test_get_drive_service_real():
     assert "files" in files_list
 
 
+@_REAL_DRIVE
 def test_load_data_real():
     """
     Real test loading CSV data from Google Drive using real credentials from .env.
@@ -264,3 +271,10 @@ def test_update_transactions_fetches_live_price_for_missing_symbol(mock_get_quot
     amd_row = updated_df[updated_df['symbol'] == 'AMD'].iloc[0]
     assert pd.isna(amd_row['sell_value'])
 
+
+
+def test_save_neutralizes_formula_cells_only():
+    df = pd.DataFrame({"a": ["=HYPERLINK(\"x\")", "-0.40 SELL | regime=X", "@SUM(A1)", "ok"], "n": [1, -2, 3, 4]})
+    out = google_handler._neutralize_formulas(df)
+    assert list(out["a"]) == ["'=HYPERLINK(\"x\")", "-0.40 SELL | regime=X", "'@SUM(A1)", "ok"]
+    assert list(out["n"]) == [1, -2, 3, 4]

@@ -38,7 +38,7 @@ A deterministic layered engine (`tools/technical_engine.py`) produces every sign
 ```
 tools/technical_engine.py       # Layered engine + regime classifier + decision (SOLE DECIDER)
 tools/custom_financial_calc.py  # Indicator computation; builds the feature vector and delegates to the engine
-tools/llms.py                   # GPT auditor (audit_buy_signal) + legacy helpers
+tools/llms.py                   # GPT auditor (audit_buy_signal)
 tools/general.py                # Decision extraction + 'action' column (technical decides, LLM veto on incoherence)
 main.py                         # Orchestrates the full pipeline
 resources/technical_config.json # Indicators, weights, regime rules and thresholds

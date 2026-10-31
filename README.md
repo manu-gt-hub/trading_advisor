@@ -11,7 +11,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 - **Explicit regime classifier** — `TRENDING_UP`, `TRENDING_DOWN`, `RANGE`, `DISTRIBUTION` based on **SMA(50/200) + ADX** (+DI/-DI). BUY is only allowed in `TRENDING_UP`.
 - **Structured, deterministic output** — `signal + strength + regime + sub_scores`, no narrative text.
 - **Indicators & weights in JSON** — All indicators, weights, regime rules and thresholds live in `resources/technical_config.json`.
-- **Modes** via `FORCE_OPINION`: `DEFAULT` (technical decides, LLM audits BUY), `CUSTOM` (technical only), `LLM1`/`LLM2` (legacy GPT-only override).
+- **Modes** via `FORCE_OPINION`: `DEFAULT` (technical decides, LLM audits BUY), `CUSTOM` (technical only), legacy `LLM1`/`LLM2` fall back to `DEFAULT`.
 - **MIN_BUY_CONFIDENCE** — Minimum technical confidence to accept a BUY (0.0-1.0, default 0.5).
 - **Risk/Reward filter** — Blocks BUY signals with R:R ratio < 1.2 (ATR-based stop-loss vs take-profit).
 - **News sentiment filter** — Blocks BUY signals when upcoming earnings or strongly negative news detected (Finnhub + GPT).
@@ -73,7 +73,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 ```bash
 git clone https://github.com/manu-gt-hub/trading_advisor.git
 cd trading_advisor
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ### Environment Variables
@@ -91,7 +91,7 @@ pip install -r requirements.txt
 | `ANALYSIS_FILE_ID` | Full analysis sheet ID |
 | `SYMBOLS_INTEREST_LIST` | Python list of tickers, e.g. `"['AAPL','MSFT']"` |
 | `REVENUE_PERCENTAGE` | Target profit % for take-profit (e.g., `10`) |
-| `FORCE_OPINION` | Decision mode: `DEFAULT`, `LLM1`, `LLM2`, `CUSTOM` |
+| `FORCE_OPINION` | Decision mode: `DEFAULT` or `CUSTOM` |
 | `MIN_BUY_CONFIDENCE` | Single BUY threshold (0.0-1.0, default 0.5): the engine emits BUY only when the risk-adjusted score reaches it |
 | `LLM_AUDIT_ENABLED` | Enable LLM audit for BUY signals (`true`/`false`, default `true`). **Recommended: `false`** for more consistent, deterministic signals |
 | `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`) |
@@ -172,7 +172,7 @@ tools/
   technical_engine.py            # Layered deterministic engine (trend/momentum/risk) + regime classifier — SOLE decider
   custom_financial_calc.py       # Indicator computation; builds feature vector and delegates to the engine
   general.py                     # Decision extraction + action column (technical decides, LLM audit veto)
-  llms.py                        # GPT auditor (audit_buy_signal) + legacy GPT/DeepSeek helpers
+  llms.py                        # GPT auditor (audit_buy_signal)
   risk_management.py             # Stop-loss, position sizing, correlation filter
   backtesting.py                 # Historical signal simulation
   historicals.py                 # Yahoo Finance + Alpha Vantage data fetching
