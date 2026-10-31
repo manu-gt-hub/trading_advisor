@@ -8,6 +8,8 @@ This folder documents **in detail** how the system analyzes technical metrics an
 
 A deterministic layered engine (`tools/technical_engine.py`) produces every signal. The LLM (GPT) is invoked **only when the technical signal is BUY** and can only (1) flag incoherences and (2) adjust the final confidence within bounds. It never re-classifies.
 
+For the system-level view (external services, daily run, filter pipeline, position lifecycle, backtest parity, CI/security) see [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md).
+
 ## Index
 
 | Document | Content |

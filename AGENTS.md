@@ -60,6 +60,7 @@ resources/technical_config.json  # ALL indicator params, weights, regime rules, 
 resources/symbols_markets.json   # symbol → exchange map (for TradingView URLs)
 resources/historicals/           # CSVs used by the backtester
 resources/doc/*.md               # Detailed engine documentation (index in resources/doc/README.md)
+docs/ARCHITECTURE.md             # System architecture: services, daily run, filters, position lifecycle, backtest parity
 
 run_backtest_all.py              # Runs the backtest over all CSVs (ENTRY POINT for validation)
 docs/BACKTEST_LOG.md             # Single source of truth for engine quality (dated sections)
