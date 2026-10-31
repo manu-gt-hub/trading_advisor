@@ -68,7 +68,7 @@ Within each layer the weights are **relative**. `_weighted_average` divides by t
 | Variable | Description |
 |---|---|
 | `MIN_BUY_CONFIDENCE` | **Single BUY-threshold knob** (0.0-1.0, def. 0.6). The engine emits BUY only if `risk_adjusted` reaches it, and BUYs are accepted post-audit against the same value |
-| `FORCE_OPINION` | Decision mode: `DEFAULT` (technical decides, LLM audits), `CUSTOM` (technical only), `LLM1`/`LLM2` (legacy) |
+| `FORCE_OPINION` | Decision mode: `DEFAULT` (technical decides, LLM audits), `CUSTOM` (technical only); legacy `LLM1`/`LLM2` fall back to `DEFAULT` |
 | `REVENUE_PERCENTAGE` | Target profit % for the take-profit |
 | `OPENAI_API_KEY`, `GPT_MODEL_NAME` | LLM auditor credentials/model |
 | `FINNHUB_API_KEY`, `ALPHA_API_KEY`, `ALPHA_VANTAGE_URL` | Market data |

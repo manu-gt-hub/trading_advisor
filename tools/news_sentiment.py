@@ -5,14 +5,20 @@ from datetime import datetime, timedelta
 from openai import OpenAI
 import httpx
 from dotenv import load_dotenv
+from tools.finnhub_client import auth_headers
+from tools.general import ssl_verify
 
 logger = logging.getLogger(__name__)
 
 if not os.getenv("GITHUB_ACTIONS"):
     load_dotenv()
 
-FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
+
+
+def _news_cfg():
+    from tools import technical_engine
+    return technical_engine.load_config().get("news_filter", {})
 
 
 def get_company_news(symbol, days_back=7):
@@ -28,11 +34,10 @@ def get_company_news(symbol, days_back=7):
         "symbol": symbol,
         "from": from_date,
         "to": today,
-        "token": FINNHUB_API_KEY,
     }
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=auth_headers(), timeout=10)
         response.raise_for_status()
         news = response.json()
 
@@ -61,11 +66,10 @@ def get_upcoming_earnings(symbol, days_ahead=5):
         "symbol": symbol,
         "from": today,
         "to": to_date,
-        "token": FINNHUB_API_KEY,
     }
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=auth_headers(), timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -82,7 +86,7 @@ def get_upcoming_earnings(symbol, days_ahead=5):
         return None
 
 
-def analyze_news_sentiment_with_llm(symbol, news_articles, max_articles=10):
+def analyze_news_sentiment_with_llm(symbol, news_articles, max_articles=None):
     """
     Use GPT to analyze sentiment of recent news headlines for a symbol.
     Returns a dict with sentiment, confidence, and summary.
@@ -91,6 +95,7 @@ def analyze_news_sentiment_with_llm(symbol, news_articles, max_articles=10):
         return {"sentiment": "NEUTRAL", "confidence": 0.5, "summary": "No recent news found."}
 
     # Take the most recent articles and extract headlines
+    max_articles = max_articles or _news_cfg().get("max_articles", 10)
     recent = news_articles[:max_articles]
     headlines = "\n".join(
         [f"- [{a.get('datetime', '')}] {a.get('headline', 'No headline')}" for a in recent]
@@ -114,26 +119,23 @@ def analyze_news_sentiment_with_llm(symbol, news_articles, max_articles=10):
     )
 
     try:
-        client = OpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            http_client=httpx.Client(verify=False),
-        )
-
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a financial news sentiment analyst. "
-                        "You evaluate how news headlines affect stock prices. "
-                        "Be concise and precise."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-        )
+        with httpx.Client(verify=ssl_verify(), timeout=(30, 120)) as http_client:
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), http_client=http_client)
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a financial news sentiment analyst. "
+                            "You evaluate how news headlines affect stock prices. "
+                            "Be concise and precise."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+            )
 
         answer = response.choices[0].message.content.strip()
         logger.info(f"📰 News sentiment for {symbol}: {answer}")
@@ -199,8 +201,9 @@ def evaluate_news_filter(symbol, news_sentiment_enabled=True):
         "news_sentiment": {"sentiment": "NEUTRAL", "confidence": 0.5, "summary": "Analysis disabled."},
     }
 
+    cfg = _news_cfg()
     # Always check earnings (cheap API call, no LLM needed)
-    earnings = get_upcoming_earnings(symbol, days_ahead=5)
+    earnings = get_upcoming_earnings(symbol, days_ahead=cfg.get("earnings_days_ahead", 5))
     if earnings:
         result["earnings_soon"] = True
         result["block_buy"] = True
@@ -214,7 +217,7 @@ def evaluate_news_filter(symbol, news_sentiment_enabled=True):
         result["news_sentiment"]["summary"] = "News sentiment analysis disabled."
         return result
 
-    news = get_company_news(symbol, days_back=7)
+    news = get_company_news(symbol, days_back=cfg.get("news_days_back", 7))
     if not news:
         result["news_sentiment"]["summary"] = "No recent news found."
         return result
@@ -223,7 +226,7 @@ def evaluate_news_filter(symbol, news_sentiment_enabled=True):
     result["news_sentiment"] = sentiment
 
     # Block BUY if sentiment is strongly negative
-    if sentiment["sentiment"] == "NEGATIVE" and sentiment["confidence"] >= 0.7:
+    if sentiment["sentiment"] == "NEGATIVE" and sentiment["confidence"] >= cfg.get("negative_block_confidence", 0.7):
         result["block_buy"] = True
         result["reason"] = f"Negative news sentiment ({sentiment['confidence']:.0%}): {sentiment['summary']}"
         logger.warning(f"🚫 {symbol}: BUY blocked — {result['reason']}")

@@ -47,13 +47,14 @@ main.py                          # Orchestrator: market-day guard, prices, engin
 tools/technical_engine.py        # SOLE DECIDER: 3-layer engine + regime classifier
 tools/custom_financial_calc.py   # Indicator computation → feature vector → engine
 tools/finnhub_client.py          # Finnhub quotes (free plan = US exchanges only)
-tools/risk_management.py         # ATR stop-loss/take-profit, R:R, sizing, correlation
-tools/llms.py                    # GPT auditor (audit_buy_signal) + legacy helpers
+tools/risk_management.py         # ATR stop-loss/take-profit, R:R, sizing, correlation,
+                                 # update_open_position (exit rules shared with backtest)
+tools/llms.py                    # GPT auditor (audit_buy_signal)
 tools/news_sentiment.py          # Earnings/news filter (Finnhub + GPT)
 tools/backtesting.py             # Backtester: simulates signals, tracks MAE/MFE per trade
 tools/google_handler.py          # Google Drive I/O, open-position tracking, trailing stop
 tools/historicals.py             # Alpha Vantage historical data fetch
-tools/general.py                 # Decision extraction, 'action' column helpers
+tools/general.py                 # 'action' column, NYSE calendar, TLS + log-redaction helpers
 
 resources/technical_config.json  # ALL indicator params, weights, regime rules, thresholds
 resources/symbols_markets.json   # symbol → exchange map (for TradingView URLs)
@@ -62,7 +63,7 @@ resources/doc/*.md               # Detailed engine documentation (index in resou
 
 run_backtest_all.py              # Runs the backtest over all CSVs (ENTRY POINT for validation)
 docs/BACKTEST_LOG.md             # Single source of truth for engine quality (dated sections)
-test/test_*.py                   # pytest suite (~117 tests)
+test/test_*.py                   # pytest suite (offline; conftest blocks yfinance)
 ```
 
 ### Engine summary (what the signals mean)
@@ -73,7 +74,11 @@ test/test_*.py                   # pytest suite (~117 tests)
 - **Regime**: `TRENDING_UP / TRENDING_DOWN / RANGE / DISTRIBUTION` (SMA + ADX). BUY **only** in `TRENDING_UP`.
 - **Aggregation**: `directional = 0.45·trend + 0.55·momentum`, then `confidence = directional · (1 − 0.5·risk)`.
 - Then a filter pipeline: `MIN_BUY_CONFIDENCE` → open-position check → `MIN_RISK_REWARD_RATIO` (ATR-based) → news filter → correlation dedup.
-- Exits: take-profit (`REVENUE_PERCENTAGE`, ATR-capped), ATR trailing stop (activates at +2%, distance = original risk), max-hold in backtest (30 days).
+- Exits (`risk_management.update_open_position`, shared by production and backtest):
+  take-profit at `REVENUE_PERCENTAGE`, initial stop 2×ATR, trailing stop (activates
+  at +2%, distance = buy_value − current stop). No time exit.
+- The backtest replays the same pipeline daily (engine → confidence → open-position
+  → R:R → exits). Not replayable offline: LLM audit, news, correlation, valuation.
 
 **Everything numeric lives in `resources/technical_config.json`.** If you change a
 threshold/weight, the logic adapts automatically — it is config-driven.
@@ -112,7 +117,7 @@ backtest comparison — but must pass the test suite.
 python -m pytest test/ -q
 ```
 
-All ~117 tests must pass. If you changed behavior, update or add tests. If a test
+All tests must pass. If you changed behavior, update or add tests. If a test
 fails because behavior intentionally changed, update the test AND note it in your
 report to the user.
 
@@ -152,14 +157,13 @@ significantly, also update `resources/doc/*.md`.
 ## 4. Commands
 
 ```bash
-# Install
-pip install -r requirements.txt
+# Install (runtime + pytest)
+pip install -r requirements-dev.txt
 
 # Full test suite
 python -m pytest test/ -q
 
-# Engine validation backtest (no API keys needed for core run;
-# valuation metrics via yfinance may warn about SSL — expected in some envs)
+# Engine validation backtest (fully offline; replays the production pipeline)
 python run_backtest_all.py
 
 # Production run (requires env vars below)
@@ -175,16 +179,15 @@ python main.py
 | `OPENAI_API_KEY`, `GPT_MODEL_NAME` | GPT audit + news sentiment (default `gpt-4o`) |
 | `GDRIVE_FILE_ID`, `BUY_RECOMMENDATIONS_ID`, `ANALYSIS_FILE_ID`, `GDRIVE_CREDENTIALS_JSON` | Google Drive I/O |
 | `REVENUE_PERCENTAGE` | Take-profit target % (e.g. `10`) |
-| `MIN_BUY_CONFIDENCE` | Min confidence for BUY (default 0.6 prod; backtest uses 0.45) |
+| `MIN_BUY_CONFIDENCE` | Min confidence for BUY (engine + post-audit filter; backtest reads it too) |
 | `MIN_RISK_REWARD_RATIO` | Min R:R for BUY (default 1.2) |
 | `LLM_AUDIT_ENABLED` | `true`/`false` — GPT audit of BUY signals |
 | `NEWS_SENT_ANALYSIS` | `true`/`false` — news/earnings filter |
-| `FORCE_OPINION` | `DEFAULT` / `CUSTOM` / `LLM1` / `LLM2` |
+| `FORCE_OPINION` | `DEFAULT` / `CUSTOM` (legacy `LLM1`/`LLM2` fall back to `DEFAULT`) |
 | `ALPHA_API_KEY`, `ALPHA_VANTAGE_URL` | Historical data refresh |
 | `LOG_LEVEL`, `DISABLE_SSL_VERIFY` | Ops |
 
-Backtest (`run_backtest_all.py`) works offline from `resources/historicals/*.csv`;
-only the optional yfinance valuation fetch touches the network.
+Backtest (`run_backtest_all.py`) works fully offline from `resources/historicals/*.csv`.
 
 ## 6. Known limitations & pitfalls
 
@@ -193,15 +196,17 @@ only the optional yfinance valuation fetch touches the network.
 - **AAPL/V are weak under the current config** (low volatility vs 10% target in
   30-day hold). Per-symbol results differ a lot — always check the per-symbol
   table, not just the consolidated row.
-- **yfinance SSL errors in some environments** — valuation metrics silently skip;
-  backtest results therefore differ slightly from production.
+- **Backtest ≠ production in a few known places**: no LLM audit, news filter,
+  correlation filter or valuation adjustment, and S&P500 context is mocked
+  NEUTRAL (no historical index data). Everything else is the same code path.
 - **Look-ahead bias**: the backtester slices history per evaluation day. If you
   modify `backtesting.py`, preserve the `min_history`-gated windowing.
-- **Backward-compat bug pattern**: when adding a new exit reason to
-  `EXIT_REASON_*` in `backtesting.py`, keep the set used by the report in sync.
-- **step_days sensitivity**: `step_days=5` (current) doubles signals vs 10 and
-  slightly worsens results — more entry points = more mediocre entries. This is
-  expected behavior, not a bug.
+- **Exit logic lives in one place**: change `risk_management.update_open_position`,
+  never re-implement exits in `backtesting.py`. New backtest exit reasons go in
+  `backtesting.EXIT_REASONS` (the report iterates it).
+- **Backtest log entries before 2026-10-31** used a different simulation (step 5,
+  30-day max hold, 2.5×ATR trailing, no initial stop, inconsistent expectancy
+  formula). Compare only against entries produced by the aligned backtest.
 - **Trailing stop is a delicate knob**: both directions (tighter/looser) have been
   tried and reverted. Treat changes as experiments requiring Rule-1 validation.
 

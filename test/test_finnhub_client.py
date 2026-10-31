@@ -3,16 +3,8 @@ import os
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
-from tools.finnhub_client import analyze_market_losers_from_interest_list, get_symbols_info, get_quote
+from tools.finnhub_client import get_symbols_info, get_quote
 
-
-# Mock data matching Finnhub API response format
-MOCK_SYMBOLS = [
-    {"symbol": "AAPL", "current_price": 150.0, "change_percent": -2.5},
-    {"symbol": "MSFT", "current_price": 300.0, "change_percent": -1.2},
-    {"symbol": "GOOGL", "current_price": 2800.0, "change_percent": 0.5},
-    {"symbol": "TSLA", "current_price": 200.0, "change_percent": -3.8},
-]
 
 MOCK_QUOTE_RESPONSES = {
     "AAPL": {"c": 150.0, "dp": -2.5},
@@ -20,44 +12,6 @@ MOCK_QUOTE_RESPONSES = {
     "GOOGL": {"c": 2800.0, "dp": 0.5},
     "TSLA": {"c": 200.0, "dp": -3.8},
 }
-
-
-def test_returns_list():
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS, top_n=1)
-    assert isinstance(losers, list), "Function should return a list"
-
-def test_items_are_dicts():
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS, top_n=1)
-    for item in losers:
-        assert isinstance(item, dict), "Each item should be a dictionary"
-
-def test_required_keys_exist():
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS, top_n=1)
-    for item in losers:
-        assert "symbol" in item
-        assert "current_price" in item
-        assert "change_percent" in item
-
-def test_change_percent_is_negative():
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS, top_n=2)
-    for item in losers:
-        assert item["change_percent"] < 0, f"{item['symbol']} is not a loser"
-
-def test_limit_applied():
-    top_n = 1
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS, top_n=top_n)
-    assert len(losers) <= top_n, f"Should return no more than {top_n} items"
-
-def test_sorted_by_most_negative():
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS)
-    # TSLA (-3.8) should be first, then AAPL (-2.5), then MSFT (-1.2)
-    assert losers[0]["symbol"] == "TSLA"
-    assert losers[1]["symbol"] == "AAPL"
-
-def test_positive_change_excluded():
-    losers = analyze_market_losers_from_interest_list(MOCK_SYMBOLS)
-    symbols = [l["symbol"] for l in losers]
-    assert "GOOGL" not in symbols, "Positive change symbols should be excluded"
 
 
 @patch("tools.finnhub_client.get_quote")
@@ -139,3 +93,14 @@ def test_get_quote_handles_unknown_symbol(mock_get):
 
     result = get_quote("BHE.DE")
     assert result is None
+
+
+@patch.dict(os.environ, {"FINNHUB_API_KEY": "k123"})
+@patch("tools.finnhub_client.API_KEY", None)
+@patch("tools.finnhub_client.requests.get")
+def test_get_quote_sends_key_in_header_not_url(mock_get):
+    mock_get.return_value.json.return_value = {"c": 10.0, "dp": 1.0}
+    get_quote("AAPL")
+    _, kwargs = mock_get.call_args
+    assert "token" not in kwargs["params"]
+    assert kwargs["headers"]["X-Finnhub-Token"] == "k123"

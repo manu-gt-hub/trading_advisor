@@ -7,30 +7,18 @@ on:
     branches: [ main ]
   workflow_dispatch:  # Permite ejecutar el workflow manualmente desde la interfaz
 
+permissions:
+  contents: read
+
 jobs:
   run-tests:
     runs-on: ubuntu-latest
     env:
-      GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}      
-      ALPHA_API_KEY: ${{ secrets.ALPHA_API_KEY }}
+      # Only the read-only Drive integration tests need real credentials; every other
+      # test is mocked/offline, so no other secret is exposed to the test job.
+      GDRIVE_CREDENTIALS_JSON: ${{ secrets.GDRIVE_CREDENTIALS_JSON }}
       GDRIVE_FILE_ID: ${{ secrets.GDRIVE_FILE_ID }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
       BUY_RECOMMENDATIONS_ID: ${{ secrets.BUY_RECOMMENDATIONS_ID }}
-      ANALYSIS_FILE_ID : ${{ secrets.ANALYSIS_FILE_ID }}
-      DEEPKSEEK_API_KEY : ${{ secrets.DEEPKSEEK_API_KEY }}
-      
-      ALPHA_VANTAGE_URL: ${{ vars.ALPHA_VANTAGE_URL }}
-      REVENUE_PERCENTAGE: ${{ vars.REVENUE_PERCENTAGE }}      
-      SYMBOLS_INTEREST_LIST: ${{ vars.SYMBOLS_INTEREST_LIST }}      
-      MAILING_LIST: ${{ vars.MAILING_LIST }}
-      GOOGLE_FINANCE_LOSERS_URL: ${{ vars.GOOGLE_FINANCE_LOSERS_URL }}   
-      LOG_LEVEL:  ${{ vars.LOG_LEVEL }} 
-      FORCE_OPINION: ${{ vars.FORCE_OPINION }}   
-      GPT_MODEL_NAME: ${{ vars.GPT_MODEL_NAME }}
-      TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
-      MIN_BUY_CONFIDENCE: ${{ vars.MIN_BUY_CONFIDENCE }}
-      LLM_AUDIT_ENABLED: ${{ vars.LLM_AUDIT_ENABLED }}
 
     steps:
       - name: Checkout repository
@@ -39,13 +27,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'  # Usa la versión de Python que prefieras
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
 
       - name: Run tests with pytest
         run: |

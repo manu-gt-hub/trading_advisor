@@ -151,6 +151,33 @@
     }
   },
 
+  "risk_management": {
+    "description": "Entry/exit rules shared by production (google_handler.update_transactions) and the backtester (tools/backtesting.py). Changing any value is an engine change (Rule 1).",
+    "stop_loss_atr_mult": 2.0,
+    "take_profit_atr_mult": 3.0,
+    "trailing_activation_pct": 2.0,
+    "max_holding_days": null,
+    "max_correlation": 0.75,
+    "correlation_lookback_days": 90,
+    "max_position_pct": 20.0
+  },
+
+  "news_filter": {
+    "earnings_days_ahead": 5,
+    "news_days_back": 7,
+    "max_articles": 10,
+    "negative_block_confidence": 0.7
+  },
+
+  "backtest": {
+    "description": "Defaults for run_backtest_all.py. Each value mirrors a production env var and is overridden by it when set, so the backtest replays the exact production filter chain.",
+    "target_profit_pct": 10.0,
+    "min_buy_confidence": 0.5,
+    "min_risk_reward_ratio": 1.2,
+    "min_history": 250,
+    "step_days": 1
+  },
+
   "llm_audit": {
     "description": "The LLM is invoked ONLY when the technical system outputs BUY and LLM_AUDIT_ENABLED=true. It does NOT re-classify. It may adjust final confidence within bounds and flag incoherence. Recommended: disable (LLM_AUDIT_ENABLED=false) for more consistent signals — the technical engine is already robust.",
     "enabled_by_env": "LLM_AUDIT_ENABLED (default: true)",

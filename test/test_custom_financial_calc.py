@@ -5,39 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from unittest.mock import patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
-from tools.custom_financial_calc import review_transactions, evaluate_buy_interest
-
-# Get revenue percentage from environment variable or use a default (e.g. 10%)
-REVENUE_PERCENTAGE = float(os.environ.get("REVENUE_PERCENTAGE", 20.0))
-
-# Get absolute path to the CSV relative to this test file
-current_dir = os.path.dirname(__file__)
-csv_path = os.path.join(current_dir, '..', 'resources', 'transactions.csv')
-transactions_csv_path = os.path.abspath(csv_path)
-
-def test_review_transactions():
-    # Load mock transactions from CSV
-    transactions_df = pd.read_csv(transactions_csv_path, parse_dates=["buy_date", "sell_date"])
-
-    # Simulated current prices for the relevant symbols
-    hist_data = pd.DataFrame([
-        {"symbol": "AAPL", "current_price": 185.00},   # Should trigger a sale if profit > 5%
-        {"symbol": "MSFT", "current_price": 320.00},   # Should also trigger a sale
-        {"symbol": "NFLX", "current_price": 405.00},   # Low gain, should NOT trigger
-        {"symbol": "NVDA", "current_price": 600.00},   # High gain, should trigger
-        {"symbol": "GOOGL", "current_price": 2950.00}, # Already sold, should be ignored
-    ])
-
-    # Run the transaction review function
-    updated_df = review_transactions(transactions_df.copy(), hist_data, REVENUE_PERCENTAGE)
-    # Assert that at least one transaction was updated
-    assert not updated_df.empty, "Expected at least one transaction to be closed, but none were"
-    # Assert all returned rows have a sell date
-    assert all(updated_df["sell_date"].notna()), "Some closed transactions are missing a sell_date"
-    # Assert that all closed transactions meet the minimum revenue threshold
-    assert all(updated_df["percentage_benefit"] >= REVENUE_PERCENTAGE), "Some closed transactions do not meet the minimum % gain"
-    # Check that a specific symbol (e.g., AAPL) was indeed sold
-    assert "AAPL" in updated_df["symbol"].values, "Expected AAPL to be closed, but it was not"
+from tools.custom_financial_calc import evaluate_buy_interest
 
 # Utility function to load historical data from CSV
 def load_hist_data():

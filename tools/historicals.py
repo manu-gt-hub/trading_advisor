@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta
 import yfinance as yf
 from dotenv import load_dotenv
+from tools.general import ssl_verify
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,7 @@ def get_symbol_history_from_alpha(symbol: str, days: int):
     }
 
     try:
-        ssl_verify = os.getenv("DISABLE_SSL_VERIFY", "").lower() not in ("1", "true", "yes")
-        response = requests.get(ALPHA_URL, params=params, verify=ssl_verify, timeout=(30, 60))
+        response = requests.get(ALPHA_URL, params=params, verify=ssl_verify(), timeout=(30, 60))
         response.raise_for_status()
         data = response.json()
 

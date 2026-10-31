@@ -1,113 +1,110 @@
 import pandas as pd
-import numpy as np
-import re
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import pytz
 import os
-import csv
 import json
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-def get_mapping_string(symbol, csv_file_path='resources/investing_symbol_mapping.csv'):
-    # Check if the CSV file exists
-    if not os.path.exists(csv_file_path):
-        logger.error(f"Error: The file {csv_file_path} was not found.")
-        return None
+SECRET_ENV_VARS = ("FINNHUB_API_KEY", "OPENAI_API_KEY", "ALPHA_API_KEY", "GDRIVE_CREDENTIALS_JSON")
 
-    try:
-        # Open the CSV file for reading
-        with open(csv_file_path, mode='r', newline='', encoding='utf-8') as file:
-            reader = csv.DictReader(file)  # Use DictReader to work with headers
 
-            # Iterate through the rows of the CSV file
-            for row in reader:
-                # Compare the symbol and return the mapping_string if there is a match
-                if row['symbol'] == symbol:
-                    return row['mapping_string']
+def ssl_verify():
+    """TLS verification for outbound HTTP: on unless DISABLE_SSL_VERIFY is set."""
+    return os.getenv("DISABLE_SSL_VERIFY", "").lower() not in ("1", "true", "yes")
 
-        # If no match is found, return None
-        logger.warning(f"The symbol {symbol} was not found in the CSV file.")
-        return None
 
-    except Exception as e:
-        # Handle any exceptions that occur while reading the CSV file
-        logger.error(f"Error reading the CSV file: {e}")
-        return None
+class SecretRedactingFilter(logging.Filter):
+    """Mask API keys in log records (e.g. URLs echoed by requests' HTTPError)."""
+
+    def filter(self, record):
+        secrets = [v for v in (os.environ.get(k) for k in SECRET_ENV_VARS) if v and len(v) >= 8]
+        if secrets:
+            msg = record.getMessage()
+            for secret in secrets:
+                msg = msg.replace(secret, "***")
+            record.msg, record.args = msg, ()
+        return True
+
+
+def install_secret_redaction():
+    """Attach SecretRedactingFilter to every root handler (idempotent)."""
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, SecretRedactingFilter) for f in handler.filters):
+            handler.addFilter(SecretRedactingFilter())
+
+
+def _observed(d):
+    if d.weekday() == 5:
+        return d - timedelta(days=1)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def _nth_weekday(year, month, weekday, n):
+    d = date(year, month, 1)
+    d += timedelta(days=(weekday - d.weekday()) % 7)
+    return d + timedelta(weeks=n - 1)
+
+
+def _last_weekday(year, month, weekday):
+    d = date(year, month + 1, 1) - timedelta(days=1)
+    return d - timedelta(days=(d.weekday() - weekday) % 7)
+
+
+def _easter(year):
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def nyse_holidays(year):
+    """Full-day NYSE closures for a year (regular rules, no ad-hoc closures)."""
+    holidays = {
+        _nth_weekday(year, 1, 0, 3),            # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),            # Presidents' Day
+        _easter(year) - timedelta(days=2),      # Good Friday
+        _last_weekday(year, 5, 0),              # Memorial Day
+        _observed(date(year, 7, 4)),            # Independence Day
+        _nth_weekday(year, 9, 0, 1),            # Labor Day
+        _nth_weekday(year, 11, 3, 4),           # Thanksgiving
+        _observed(date(year, 12, 25)),          # Christmas
+    }
+    # New Year's Day: a Saturday holiday is NOT moved to Friday Dec 31
+    new_year = date(year, 1, 1)
+    if new_year.weekday() != 5:
+        holidays.add(_observed(new_year))
+    if year >= 2022:
+        holidays.add(_observed(date(year, 6, 19)))  # Juneteenth
+    return holidays
+
+
+def is_us_market_day(day=None):
+    """True on NYSE trading days. Defaults to today's date in New York."""
+    if day is None:
+        day = datetime.now(pytz.timezone("America/New_York")).date()
+    return day.weekday() < 5 and day not in nyse_holidays(day.year)
+
 
 def add_opinion(symbol,df,new_column_name,opinion):
     df.loc[df['symbol'] == symbol, new_column_name] = opinion
-
-def parse_transactions_df(df):
-    parsed_df = df.copy()
-
-    # convert dates
-    parsed_df['buy_date'] = pd.to_datetime(parsed_df['buy_date'], errors='coerce')
-    parsed_df['sell_date'] = pd.to_datetime(parsed_df['sell_date'], errors='coerce')
-
-    # convert to nums
-    parsed_df['current_price'] = pd.to_numeric(parsed_df['current_price'], errors='coerce')
-    parsed_df['sell_value'] = pd.to_numeric(parsed_df['sell_value'], errors='coerce')
-    parsed_df['percentage_benefit'] = pd.to_numeric(parsed_df['percentage_benefit'], errors='coerce')
-    parsed_df['buy_sell_days_diff'] = pd.to_numeric(parsed_df['buy_sell_days_diff'], errors='coerce').astype('Int64')  # permite NaN
-
-    return parsed_df
-
-# Function to extract the dominant opinion from trading_view_opinion
-# DEPRECATED DUE TO CAPTCHAS
-def extract_trading_view_decision(opinion):
-    if opinion == None:
-        return "error"
-    
-    matches = re.findall(r'(\w+)\s+\((\d+)\)', opinion)
-    if not matches:
-        return None
-    matches = [(op.upper(), int(score)) for op, score in matches]
-    return max(matches, key=lambda x: x[1])[0]  # Returns 'SELL', 'BUY', etc.
-
-# Function to extract the decision from llm_op
-def extract_llm_decision(opinion):
-    if not isinstance(opinion, str):
-        return None
-    # Handle new format: "75% BUY - explanation" or old format: "BUY - explanation"
-    first_part = opinion.split('-')[0].strip().upper()
-    # Remove confidence prefix if present (e.g., "75% BUY" → "BUY")
-    for decision in ['BUY', 'SELL', 'HOLD']:
-        if decision in first_part:
-            return decision
-    return 'EMPTY_DECISION'
-
-def extract_llm_confidence(opinion):
-    """Extract the confidence percentage from LLM output like '75% BUY - ...'.
-    Returns a float between 0.0 and 1.0, or 0.5 as default if not found."""
-    if not isinstance(opinion, str):
-        return 0.5
-    try:
-        first_part = opinion.split('-')[0].strip()
-        for token in first_part.split():
-            token = token.strip().rstrip('%')
-            val = float(token)
-            if 0 <= val <= 100:
-                return val / 100.0
-    except (ValueError, IndexError):
-        pass
-    return 0.5
 
 def extract_custom_decision(opinion):
     if not isinstance(opinion, str):
         return None
     return opinion.split(' ')[1].strip().upper()  # Returns 'SELL', 'BUY', etc.
 
-def extract_custom_confidence(opinion):
-    """Extract the confidence float from a custom label like '0.45 BUY'."""
-    if not isinstance(opinion, str):
-        return 0.0
-    try:
-        return float(opinion.split(' ')[0].strip())
-    except (ValueError, IndexError):
-        return 0.0
 
 def apply_audit_veto(technical_decision, llm_opinion):
     """
@@ -127,114 +124,38 @@ def apply_audit_veto(technical_decision, llm_opinion):
         return 'HOLD'
     return technical_decision
 
-# Function to decide final action based on both opinions
-def decide_final_action(llm_decision, llm_2_decision, custom_decision=None, custom_confidence=None):
-    error_values = [None, 'error', 'ERROR', 'EMPTY_DECISION', 'EVALUATION_FAILED']
-
-    llm_valid = llm_decision not in error_values
-    llm2_valid = llm_2_decision not in error_values
-    custom_valid = custom_decision not in error_values
-
-    # Collect valid decisions
-    valid_decisions = []
-    if llm_valid:
-        valid_decisions.append(llm_decision)
-    if llm2_valid:
-        valid_decisions.append(llm_2_decision)
-
-    # If no valid LLM decisions, fall back to custom if available
-    if not valid_decisions:
-        if custom_valid:
-            return custom_decision
-        return 'EMPTY_DECISION'
-
-    # If only one valid LLM decision
-    if len(valid_decisions) == 1:
-        single = valid_decisions[0]
-        # If custom agrees or custom is unavailable, use the single LLM decision
-        if not custom_valid or custom_decision == single:
-            return single
-        # LLM and custom disagree: conservative approach — prefer HOLD unless both say SELL
-        if single == 'SELL' and custom_decision == 'SELL':
-            return 'SELL'
-        return 'HOLD'
-
-    # Both LLMs are valid
-    if llm_decision == llm_2_decision:
-        return llm_decision
-
-    # LLMs disagree: use custom as tiebreaker if available
-    if custom_valid:
-        # If custom agrees with either LLM, use that
-        if custom_decision == llm_decision:
-            return llm_decision
-        elif custom_decision == llm_2_decision:
-            return llm_2_decision
-        # Custom disagrees with both: use custom with high confidence, else HOLD
-        if custom_confidence is not None and abs(custom_confidence) >= 0.4:
-            return custom_decision
-        return 'HOLD'
-
-    # LLMs disagree and no custom: conservative HOLD
-    # Exception: if one says BUY and the other HOLD, prefer HOLD (conservative)
-    # Exception: if one says SELL and the other HOLD, prefer SELL (risk management)
-    decisions_set = {llm_decision, llm_2_decision}
-    if decisions_set == {'SELL', 'HOLD'}:
-        return 'SELL'
-    if decisions_set == {'SELL', 'BUY'}:
-        return 'HOLD'
-    return 'HOLD'
-
-    
-
 def generate_action_column(df: pd.DataFrame, opinion_type: str) -> pd.DataFrame:
     """
-    Adds a 'action' column to the DataFrame based on matching logic
-    between 'llm_opinion' and 'llm_2_opinion'.
+    Adds an 'action' column to the DataFrame.
 
     Parameters:
-        df (pd.DataFrame): DataFrame containing 'llm_opinion' and 'llm_2_opinion' columns.
-        opinion_type (str): Optionally force decision source: "LLM1", "LLM2", or "CUSTOM".
+        df (pd.DataFrame): DataFrame with 'manual_financial_analysis' and 'llm_opinion' columns.
+        opinion_type (str): "CUSTOM" = technical label only (ignores the LLM audit veto);
+            anything else = DEFAULT (technical decides, LLM INCOHERENT downgrades BUY to HOLD).
+            The legacy "LLM1"/"LLM2" modes relied on LLMs that no longer emit decisions and
+            fall back to DEFAULT.
 
     Returns:
         pd.DataFrame: Original DataFrame with 'action' column added.
     """
-    # Clean force_opinion input (default to empty string when env var is unset)
     opinion_type = (opinion_type or "").strip().upper()
     logger.debug(f"Opinion type: {opinion_type}")
 
-    if opinion_type == "LLM1":
-        logger.debug("set decision logic as LLM-1 (GPT only)")
+    if opinion_type in ("LLM1", "LLM2"):
+        logger.warning(f"FORCE_OPINION={opinion_type} is no longer supported; using DEFAULT.")
 
-        df['action'] = df['llm_opinion'].apply(extract_llm_decision)
-
-    elif opinion_type == "LLM2":
-        logger.debug("set decision logic as LLM-2")
-
-        if 'llm_2_opinion' not in df.columns:
-            logger.warning("LLM2 mode selected but 'llm_2_opinion' column not found. Falling back to LLM1.")
-            df['action'] = df['llm_opinion'].apply(extract_llm_decision)
-        else:
-            df['action'] = df['llm_2_opinion'].apply(extract_llm_decision)
-
-    elif opinion_type == "CUSTOM":
+    if opinion_type == "CUSTOM":
         logger.debug("set decision logic as CUSTOM (technical analysis only)")
-
         df['action'] = df['manual_financial_analysis'].apply(extract_custom_decision)
+        return df
 
-    else:  # Default logic: technical engine decides; LLM only audits BUY signals
-        logger.debug("set decision logic as DEFAULT (technical decides, LLM audits)")
-
-        if 'manual_financial_analysis' in df.columns:
-            df['action'] = df['manual_financial_analysis'].apply(extract_custom_decision)
-            if 'llm_opinion' in df.columns:
-                df['action'] = df.apply(
-                    lambda row: apply_audit_veto(row['action'], row['llm_opinion']),
-                    axis=1
-                )
-        else:
-            df['action'] = df['llm_opinion'].apply(extract_llm_decision)
-
+    logger.debug("set decision logic as DEFAULT (technical decides, LLM audits)")
+    df['action'] = df['manual_financial_analysis'].apply(extract_custom_decision)
+    if 'llm_opinion' in df.columns:
+        df['action'] = df.apply(
+            lambda row: apply_audit_veto(row['action'], row['llm_opinion']),
+            axis=1
+        )
     return df
 
 def get_current_time_madrid():

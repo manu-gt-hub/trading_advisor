@@ -273,3 +273,58 @@ def test_backtest_confidence_filter_reduces_trades(mock_sp500, mock_weekly, symb
     assert filtered_buys + filtered_out == no_filter_buys, (
         f"{symbol}: {filtered_buys} + {filtered_out} != {no_filter_buys}"
     )
+
+
+# ─── Production-alignment tests (synthetic, deterministic) ────────────
+
+
+def _synthetic(closes):
+    n = len(closes)
+    return pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=n, freq="B"),
+        "open": closes, "high": closes, "low": closes, "close": closes, "volume": [1000] * n,
+    })
+
+
+def _always_buy(atr):
+    def fake(symbol, df, price, **kwargs):
+        return {"evaluation": "BUY", "confidence": 0.7, "signals": {"ATR_14": atr}}
+    return fake
+
+
+def test_backtest_exits_on_initial_stop_loss_like_production():
+    closes = [100.0] * 5 + [99.0, 97.0, 94.0, 93.0, 100.0]
+    with patch("tools.backtesting.evaluate_buy_interest", side_effect=_always_buy(2.5)):
+        res = run_backtest(_synthetic(closes), "SYN", min_history=4, step_days=1)
+    first = res["trades"][0]
+    assert first["exit_reason"] == "stop_loss"
+    assert first["actual_return_pct"] == -5.0  # exit at stored stop 100 - 2*2.5
+    assert first["days_held"] == 3
+
+
+def test_backtest_target_exit_uses_target_price():
+    closes = [100.0] * 5 + [104.0, 113.0, 113.0]
+    with patch("tools.backtesting.evaluate_buy_interest", side_effect=_always_buy(2.0)):
+        res = run_backtest(_synthetic(closes), "SYN", target_profit_pct=10.0, min_history=4, step_days=1)
+    first = res["trades"][0]
+    assert first["exit_reason"] == "target"
+    assert first["actual_return_pct"] == 10.0
+
+
+def test_backtest_rr_filter_blocks_like_production():
+    closes = [100.0] * 10
+    # ATR 10 -> stop 80, target min(110, 130)=110 -> R:R 0.5 < 1.2
+    with patch("tools.backtesting.evaluate_buy_interest", side_effect=_always_buy(10.0)):
+        res = run_backtest(_synthetic(closes), "SYN", min_history=4, step_days=1, min_risk_reward_ratio=1.2)
+    assert res["total_buy_signals"] == 0
+    assert res["filtered_by_rr"] == 5
+
+
+def test_backtest_no_buy_on_exit_day():
+    closes = [100.0] * 5 + [94.0, 100.0, 100.0]
+    with patch("tools.backtesting.evaluate_buy_interest", side_effect=_always_buy(2.5)) as ev:
+        res = run_backtest(_synthetic(closes), "SYN", min_history=4, step_days=1)
+    exit_idx = 5
+    entries = [pd.Timestamp(t["entry_date"]) for t in res["trades"]]
+    df = _synthetic(closes)
+    assert pd.Timestamp(df["date"][exit_idx], tz="UTC") not in entries

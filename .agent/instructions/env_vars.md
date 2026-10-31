@@ -18,11 +18,11 @@
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MIN_BUY_CONFIDENCE` | 0.6 prod (0.45 in backtests) | Min confidence for BUY |
+| `MIN_BUY_CONFIDENCE` | engine: 0.5 (`buy_threshold_default`); post-audit filter: 0.6 | Min confidence for BUY — set it explicitly so both agree; the backtest reads it too |
 | `MIN_RISK_REWARD_RATIO` | 1.2 | Min R:R (ATR stop vs target) |
 | `LLM_AUDIT_ENABLED` | true | GPT audit of BUY signals (recommend `false`) |
 | `NEWS_SENT_ANALYSIS` | false | News/earnings filter |
-| `FORCE_OPINION` | DEFAULT | DEFAULT / CUSTOM / LLM1 / LLM2 |
+| `FORCE_OPINION` | DEFAULT | DEFAULT / CUSTOM (legacy LLM1/LLM2 fall back to DEFAULT) |
 | `TRANSACTIONS_MAX_RECORDS` | 100 | Sheet cap |
 | `LOG_LEVEL` | INFO | Logging |
 
@@ -32,10 +32,11 @@
 |---|---|
 | `ALPHA_API_KEY`, `ALPHA_VANTAGE_URL` | Historical data refresh |
 | `DISABLE_SSL_VERIFY` | Set only if env has broken cert chain |
-| `DEEPKSEEK_API_KEY` | Legacy/experimental LLM |
 
 ## Environment notes
 
 - `GITHUB_ACTIONS` is auto-set in CI — code branches on it for `.env` loading.
+- API keys are masked in logs (`general.SecretRedactingFilter`); Finnhub is
+  authenticated via the `X-Finnhub-Token` header, never the URL.
 - Finnhub free tier: **US exchanges only**. `.L`, `.DE`, `.PA`, etc. → 403/zeros.
   The system skips invalid quotes safely but the symbol gets no analysis.

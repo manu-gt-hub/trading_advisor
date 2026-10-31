@@ -1,7 +1,6 @@
 import os
 import requests
 from dotenv import load_dotenv
-import ast
 import logging
 
 logger = logging.getLogger(__name__)
@@ -10,19 +9,21 @@ logger = logging.getLogger(__name__)
 if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
     load_dotenv()
 
-# Your predefined symbols of interest
-SYMBOLS_INTEREST_LIST = ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST", "[]"))
-
 API_KEY = os.environ.get("FINNHUB_API_KEY")
+
+
+def auth_headers():
+    """Finnhub auth via header so the key never appears in URLs, logs or exceptions."""
+    return {"X-Finnhub-Token": API_KEY or os.environ.get("FINNHUB_API_KEY", "")}
 
 def get_quote(symbol):
     """Fetch current quote data for a symbol from Finnhub.
     Returns the JSON response dict, or None if the request fails or the symbol is not found.
     """
     url = "https://finnhub.io/api/v1/quote"
-    params = {"symbol": symbol, "token": API_KEY}
+    params = {"symbol": symbol}
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=auth_headers(), timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -75,34 +76,3 @@ def get_symbols_info(symbols):
 
     logger.info(f"✅ Got valid data for {len(symbols_info_list)}/{len(symbols)} symbols")
     return symbols_info_list
-
-def analyze_market_losers_from_interest_list(symbols, top_n=None):
-    """
-    Analyze a list of predefined symbols and return the top losers
-    based on percentage drop (dp field).
-    """
-    losers = []
-
-    logger.info(f"Analyzing market losers...")
-
-    for symbol in symbols:
-        try:
-            current_price = symbol['current_price']
-            change_percent = symbol['change_percent']
-
-            # if symbol has had a change percent we add it as loser
-            if change_percent is not None and change_percent < 0:
-                losers.append(symbol)
-        except Exception as e:
-            logger.error(f"❌ Error retrieving data for {symbol}: {e}")
-
-    # Sort the list by most negative change
-    losers.sort(key=lambda x: x["change_percent"])
-    
-    logger.info(f"✅  successfully got market losers")
-
-    if top_n is None:
-        return losers  # return full list
-    else:
-        return losers[:top_n]
-

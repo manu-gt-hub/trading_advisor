@@ -5,7 +5,7 @@ import pandas as pd
 from unittest.mock import patch, MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools')))
-from risk_management import compute_stop_loss_take_profit, compute_position_size, filter_correlated_buys
+from risk_management import compute_stop_loss_take_profit, compute_position_size, filter_correlated_buys, update_open_position
 
 
 class TestStopLossTakeProfit:
@@ -144,3 +144,53 @@ class TestCorrelationFilter:
         result = filter_correlated_buys(df, max_correlation=0.99)
         # With random independent data and very high threshold, both should stay
         assert len(result) == 2
+
+    @patch("risk_management.yf.Ticker")
+    def test_removed_symbol_cannot_remove_others(self, mock_ticker):
+        """A~B correlated, A~C correlated, B and C independent; B has top confidence.
+        B removes A; A must not then remove C."""
+        import numpy as np
+        rng = np.random.default_rng(0)
+        dates = pd.date_range("2024-01-01", periods=100)
+        rb, rc = rng.normal(0, 0.01, 100), rng.normal(0, 0.01, 100)
+        ra = rb + rc
+        series = {"A": ra, "B": rb, "C": rc}
+
+        def ticker_side_effect(sym):
+            mock = MagicMock()
+            mock.history.return_value = pd.DataFrame({"Close": 100 * np.cumprod(1 + series[sym])}, index=dates)
+            return mock
+
+        mock_ticker.side_effect = ticker_side_effect
+        df = pd.DataFrame({"symbol": ["A", "B", "C"], "technical_confidence": [0.6, 0.9, 0.5]})
+        result = filter_correlated_buys(df, max_correlation=0.6)
+        assert sorted(result["symbol"]) == ["B", "C"]
+
+
+class TestUpdateOpenPosition:
+
+    def test_sets_highest_on_first_observation(self):
+        pos = update_open_position(100.0, 95.0, float("nan"), 101.0, 110.0)
+        assert pos["highest_price"] == 101.0 and pos["highest_changed"]
+        assert pos["exit_reason"] is None and pos["trailed_from"] is None
+
+    def test_trailing_not_active_below_activation(self):
+        pos = update_open_position(100.0, 95.0, 101.5, 101.0, 110.0)
+        assert pos["stop_loss"] == 95.0 and pos["trailed_from"] is None
+
+    def test_trailing_ratchets_by_original_risk(self):
+        pos = update_open_position(100.0, 95.0, 104.0, 103.0, 110.0)
+        assert pos["stop_loss"] == 99.0 and pos["trailed_from"] == 95.0
+        assert pos["exit_reason"] is None
+
+    def test_stop_hit_exits_at_stop(self):
+        pos = update_open_position(100.0, 95.0, 100.5, 94.0, 110.0)
+        assert pos["exit_reason"] == "stop_loss" and pos["exit_price"] == 95.0
+
+    def test_target_hit_exits_at_target(self):
+        pos = update_open_position(100.0, 95.0, 105.0, 112.0, 110.0)
+        assert pos["exit_reason"] == "take_profit" and pos["exit_price"] == 110.0
+
+    def test_missing_stop_never_stops_out(self):
+        pos = update_open_position(100.0, None, float("nan"), 50.0, 110.0)
+        assert pos["exit_reason"] is None
