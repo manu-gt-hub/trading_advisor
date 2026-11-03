@@ -17,7 +17,7 @@ from contextlib import nullcontext
 from unittest.mock import patch
 
 from tools import technical_engine
-from tools.backtesting import run_backtest, format_backtest_report, EXIT_REASONS
+from tools.backtesting import run_backtest, format_backtest_report, summarize_trades, split_trades, EXIT_REASONS
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -107,10 +107,16 @@ def _backtest_symbol(filename, symbol, params, weekly):
     return header, results
 
 
-def run_all_backtests(params=None, weekly=True, workers=None):
+def resolve_oos_start(cli_value=None):
+    return cli_value or technical_engine.load_config().get("backtest", {}).get("oos_start")
+
+
+def run_all_backtests(params=None, weekly=True, workers=None, oos_start=None):
     """Run backtests on all CSV files (in parallel) and print a summary."""
     params = params or resolve_params()
-    print("Parameters: " + ", ".join(f"{k}={v}" for k, v in params.items()) + f", weekly={weekly}")
+    oos_start = oos_start or resolve_oos_start()
+    print("Parameters: " + ", ".join(f"{k}={v}" for k, v in params.items())
+          + f", weekly={weekly}, oos_start={oos_start}")
     jobs = []
     for filename, symbol in FILE_SYMBOL_MAP.items():
         if not os.path.exists(os.path.join(HIST_DIR, filename)):
@@ -128,7 +134,54 @@ def run_all_backtests(params=None, weekly=True, workers=None):
         print(format_backtest_report(results))
         all_results.append(results)
     _print_summary(all_results)
+    if oos_start:
+        _print_period_summary(all_results, oos_start)
     return all_results
+
+
+def _fmt_row(label, m):
+    if not m["trades"]:
+        return f"  {label:<26} {0:>6}       -        -        -       -        -        -"
+    pf = f"{m['profit_factor']:.2f}" if m["profit_factor"] != float("inf") else "inf"
+    return (f"  {label:<26} {m['trades']:>6} {m['win_rate']:>7.1%} {m['avg_return_pct']:>+7.2f}% "
+            f"{m['expectancy_pct']:>+7.2f}% {pf:>7} {m['avg_mfe_pct']:>+7.2f}% {m['avg_mae_pct']:>+7.2f}%")
+
+
+def _print_period_summary(all_results, oos_start):
+    """In-sample vs out-of-sample (by entry date) plus a per-year stability view.
+
+    Tune on IN-SAMPLE; a change is only credible if OUT-OF-SAMPLE does not degrade.
+    Trades are identical to the consolidated table — only partitioned.
+    """
+    trades = [t for r in all_results for t in r["trades"]]
+    if not trades:
+        return
+    in_s, out_s = split_trades(trades, oos_start)
+    header = f"  {'Period':<26} {'Trades':>6} {'Win%':>7} {'AvgRet':>8} {'Expect':>8} {'PF':>7} {'AvgMFE':>8} {'AvgMAE':>8}"
+    print("\n" + "=" * 100)
+    print(f"  OUT-OF-SAMPLE VALIDATION (split at {oos_start}, by entry date)")
+    print("=" * 100)
+    print(header)
+    print("-" * 100)
+    print(_fmt_row(f"IN-SAMPLE  < {oos_start}", summarize_trades(in_s)))
+    print(_fmt_row(f"OUT-SAMPLE >= {oos_start}", summarize_trades(out_s)))
+    print(_fmt_row("ALL", summarize_trades(trades)))
+
+    print("\n  Per year (stability):")
+    print(header)
+    years = sorted({pd.Timestamp(t["entry_date"]).year for t in trades})
+    for y in years:
+        print(_fmt_row(str(y), summarize_trades([t for t in trades if pd.Timestamp(t["entry_date"]).year == y])))
+
+    print("\n  Per symbol, avg return IN -> OUT (trades):")
+    for r in all_results:
+        if not r["trades"]:
+            continue
+        a, b = (summarize_trades(x) for x in split_trades(r["trades"], oos_start))
+        fa = f"{a['avg_return_pct']:+.2f}% ({a['trades']})" if a["trades"] else "-"
+        fb = f"{b['avg_return_pct']:+.2f}% ({b['trades']})" if b["trades"] else "-"
+        print(f"    {r['symbol']:<6} {fa:>16} -> {fb:>16}")
+    print("=" * 100)
 
 
 def _print_summary(all_results):
@@ -141,8 +194,6 @@ def _print_summary(all_results):
         print("-" * 100)
 
         total_buys = 0
-        total_wins = 0
-        all_returns = []
         all_trades = []
 
         for r in all_results:
@@ -161,30 +212,16 @@ def _print_summary(all_results):
                 pf_str = f"{pf:.2f}" if pf != float("inf") else "inf"
                 print(f"  {sym:<8} {buys:>5} {wins:>5} {wr:>6.1%} {avg:>+7.2f}% {exp:>+7.2f}% {pf_str:>6} {mfe:>+7.2f}% {mae:>+7.2f}% {sys_ret:>+8.2f}% {bh:>+8.2f}%")
                 total_buys += buys
-                total_wins += wins
-                all_returns.extend([t["actual_return_pct"] for t in r["trades"]])
                 all_trades.extend(r["trades"])
             else:
                 print(f"  {sym:<8} {buys:>5}     -       -        -        -      -        -        -         -  {bh:>+8.2f}%")
 
         print("-" * 100)
         if total_buys > 0:
-            overall_wr = total_wins / total_buys
-            avg_all = sum(all_returns) / len(all_returns)
-            all_df = pd.DataFrame(all_trades)
-            w = all_df[all_df["actual_return_pct"] > 0]
-            l = all_df[all_df["actual_return_pct"] <= 0]
-            avg_w = float(w["actual_return_pct"].mean()) if len(w) > 0 else 0
-            avg_l = float(l["actual_return_pct"].mean()) if len(l) > 0 else 0
-            gp = float(w["actual_return_pct"].sum()) if len(w) > 0 else 0
-            gl = abs(float(l["actual_return_pct"].sum())) if len(l) > 0 else 0
-            pf_t = gp / gl if gl > 0 else float("inf")
-            pos_rate = len(w) / len(all_df)
-            exp_t = pos_rate * avg_w + (1 - pos_rate) * avg_l
-            mfe_t = float(all_df["mfe_pct"].mean())
-            mae_t = float(all_df["mae_pct"].mean())
-            pf_str = f"{pf_t:.2f}" if pf_t != float("inf") else "inf"
-            print(f"  {'TOTAL':<8} {total_buys:>5} {total_wins:>5} {overall_wr:>6.1%} {avg_all:>+7.2f}% {exp_t:>+7.2f}% {pf_str:>6} {mfe_t:>+7.2f}% {mae_t:>+7.2f}%")
+            m = summarize_trades(all_trades)
+            pf_str = f"{m['profit_factor']:.2f}" if m["profit_factor"] != float("inf") else "inf"
+            print(f"  {'TOTAL':<8} {m['trades']:>5} {m['wins']:>5} {m['win_rate']:>6.1%} {m['avg_return_pct']:>+7.2f}% "
+                  f"{m['expectancy_pct']:>+7.2f}% {pf_str:>6} {m['avg_mfe_pct']:>+7.2f}% {m['avg_mae_pct']:>+7.2f}%")
         print("=" * 100)
 
         # MAE/MFE analysis by MFE band
@@ -265,5 +302,6 @@ if __name__ == "__main__":
     ap.add_argument("--step-days", type=int, help="evaluate every N days (production: 1)")
     ap.add_argument("--max-hold", type=int, help="experimental time exit in trading days (production: none)")
     ap.add_argument("--no-weekly", action="store_true", help="disable weekly confirmation (legacy behaviour)")
+    ap.add_argument("--oos-start", help="out-of-sample start date YYYY-MM-DD (default: config backtest.oos_start)")
     cli = ap.parse_args()
-    run_all_backtests(resolve_params(cli), weekly=not cli.no_weekly)
+    run_all_backtests(resolve_params(cli), weekly=not cli.no_weekly, oos_start=resolve_oos_start(cli.oos_start))

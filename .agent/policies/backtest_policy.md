@@ -17,7 +17,9 @@ Any modification to the prediction/decision path:
    `docs/BACKTEST_LOG.md` entry — the baseline).
 2. **AFTER**: run `python run_backtest_all.py` again.
 3. **COMPARE**: win rate, avg return/trade, expectancy, profit factor,
-   exit-reason mix, MAE/MFE, per-symbol table.
+   exit-reason mix, MAE/MFE, per-symbol table — for **IN-SAMPLE and
+   OUT-OF-SAMPLE separately** (the runner prints both; split date in
+   `technical_config.json` → `backtest.oos_start`).
 4. **REPORT** to the user a before/after table and ask: **keep or revert?**
 5. **APPROVED** → update `docs/BACKTEST_LOG.md` (new dated entry, becomes new
    baseline) → then request commit confirmation per `commit_policy.md`.
@@ -30,6 +32,17 @@ Any modification to the prediction/decision path:
 - Claiming improvement based on intuition or a single metric — expectancy AND
   profit factor must both be considered, plus per-symbol breakdown.
 - Cherry-picking the winning symbol — consolidated AND per-symbol tables required.
+- Tuning on the out-of-sample period. Explore and tune on IN-SAMPLE only; the
+  OUT-OF-SAMPLE row is the acceptance check. A change that improves in-sample
+  but degrades out-of-sample is overfitting → revert.
+- Moving `oos_start` to make a change look better. Moving it is itself a
+  measurement change that needs user approval and a BACKTEST_LOG note.
+
+## Out-of-sample caveat
+
+The config in force before 2026-11 was tuned on the full history, so its
+out-of-sample figures are optimistic, not a clean holdout. The holdout is
+only clean for changes made from now on.
 
 ## Special note: changes to `backtesting.py`
 

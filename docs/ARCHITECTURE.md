@@ -299,6 +299,9 @@ python run_backtest_all.py --max-hold 30   # experiment flags: --min-conf --min-
 ```
 
 Symbols run in parallel processes; the result is identical to a serial run.
+The report splits trades by entry date at `backtest.oos_start`: tuning uses
+the **in-sample** period, and acceptance requires that the **out-of-sample**
+period does not degrade. A per-year table shows stability.
 The first output line prints the resolved parameters, so every
 [`BACKTEST_LOG.md`](BACKTEST_LOG.md) entry is reproducible.
 

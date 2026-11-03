@@ -31,7 +31,9 @@ Use for ANY change in the decision path — see `policies/backtest_policy.md` fo
 | Expectancy | | | |
 | Profit factor | | | |
 | Avg MFE / Avg MAE | | | |
-| Exit mix (target/trail/hold) | | | |
+| Exit mix (target/trail/stop) | | | |
+| **OOS** avg return / expectancy | | | |
+| **OOS** profit factor | | | |
 
 ### Per-symbol
 | Symbol | WR before | WR after | Sys% before | Sys% after |
@@ -43,7 +45,10 @@ Verdict: <improved / degraded / neutral> — keep or revert?
 
 ## Judgment rules
 
-- Improvement = expectancy AND profit factor both non-worse, and no symbol
-  catastrophically degraded (PF < 1 newly appearing counts as degradation).
+- Improvement = expectancy AND profit factor both non-worse **in-sample AND
+  out-of-sample**, and no symbol catastrophically degraded (PF < 1 newly
+  appearing counts as degradation).
+- In-sample better but out-of-sample worse = overfitting → revert.
+- OOS has ~20 trades: differences under ~0.5pp avg return are noise; say so.
 - A win-rate-only improvement with worse expectancy is NOT an improvement.
 - Small-sample noise: <5 trade difference per symbol → describe as "neutral".

@@ -252,6 +252,37 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
     }
 
 
+def summarize_trades(trades):
+    """Aggregate metrics for any list of trade dicts (a symbol, a period, or everything)."""
+    if not trades:
+        return {"trades": 0}
+    t = pd.DataFrame(trades)
+    ret = t["actual_return_pct"]
+    winners, losers = ret[ret > 0], ret[ret <= 0]
+    gross_loss = abs(float(losers.sum()))
+    pos_rate = len(winners) / len(t)
+    avg_win = float(winners.mean()) if len(winners) else 0.0
+    avg_loss = float(losers.mean()) if len(losers) else 0.0
+    return {
+        "trades": len(t),
+        "wins": int(t["hit_target"].sum()),
+        "win_rate": float(t["hit_target"].mean()),
+        "avg_return_pct": float(ret.mean()),
+        "expectancy_pct": pos_rate * avg_win + (1 - pos_rate) * avg_loss,
+        "profit_factor": float(winners.sum()) / gross_loss if gross_loss > 0 else float("inf"),
+        "avg_mfe_pct": float(t["mfe_pct"].mean()),
+        "avg_mae_pct": float(t["mae_pct"].mean()),
+    }
+
+
+def split_trades(trades, oos_start):
+    """Partition trades by entry date into (in-sample, out-of-sample)."""
+    cut = pd.Timestamp(oos_start, tz="UTC")
+    in_sample = [t for t in trades if pd.Timestamp(t["entry_date"]) < cut]
+    out_sample = [t for t in trades if pd.Timestamp(t["entry_date"]) >= cut]
+    return in_sample, out_sample
+
+
 def format_backtest_report(results):
     """Format backtest results into a readable string report."""
     if results["total_buy_signals"] == 0:

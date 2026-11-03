@@ -208,3 +208,27 @@ stop_loss          25   -4.00%
 
 - Stop fill at market price (`min(stop, price)`) instead of the stop price: avg return +1.24%, PF 1.80. More honest measurement; candidate next baseline.
 - Trailing distance fixed at the initial risk (today it uses `buy_value − current stop`, which freezes the stop near breakeven): avg return +2.26%, target hit 33%, PF 2.52. Mixed; re-test on the honest baseline.
+
+---
+
+## 2026-11-03 — Out-of-sample split added to the report (baseline OOS figures)
+
+Reporting change only: trades and consolidated metrics are identical to the
+2026-10-31 baseline (93 trades, +2.08%, PF 2.88). The runner now also splits
+trades by entry date at `backtest.oos_start = 2025-01-01`.
+
+**From now on:** tune on IN-SAMPLE; accept a change only if OUT-OF-SAMPLE
+does not degrade. Caveat: the current config was tuned on the full history,
+so these OOS figures are optimistic, not a clean holdout.
+
+| Period | Trades | Win% | AvgRet | PF | AvgMAE |
+|---|---|---|---|---|---|
+| In-sample (< 2025-01-01) | 72 | 22.2% | +2.21% | 3.17 | -2.12% |
+| **Out-of-sample (≥ 2025-01-01)** | **21** | 23.8% | **+1.64%** | **2.16** | -2.91% |
+
+Per year: 2023 +2.41% (36) · 2024 +2.08% (30) · 2025 +1.10% (17) · 2026 +3.91% (4).
+2022 (bear market) produced a single trade: the regime gate kept the system out.
+
+Per symbol avg return IN → OUT: AAPL +1.19 → +0.31 · NVDA +3.84 → +2.78 ·
+KO +0.58 → +2.81 · META +2.16 → +0.63 · V +2.37 → +1.67 · MSFT has no OOS
+trades (its CSV ends 2025-05) — refreshing MSFT data is pending.
