@@ -328,3 +328,17 @@ def test_backtest_no_buy_on_exit_day():
     entries = [pd.Timestamp(t["entry_date"]) for t in res["trades"]]
     df = _synthetic(closes)
     assert pd.Timestamp(df["date"][exit_idx], tz="UTC") not in entries
+
+
+def test_summarize_and_split_trades():
+    from tools.backtesting import summarize_trades, split_trades
+    mk = lambda d, r, hit: {"entry_date": pd.Timestamp(d, tz="UTC"), "actual_return_pct": r,
+                            "hit_target": hit, "mfe_pct": max(r, 0), "mae_pct": min(r, 0)}
+    trades = [mk("2024-06-01", 10.0, True), mk("2024-12-31", -4.0, False), mk("2025-01-01", 2.0, False)]
+    ins, oos = split_trades(trades, "2025-01-01")
+    assert len(ins) == 2 and len(oos) == 1
+    m = summarize_trades(ins)
+    assert m["trades"] == 2 and m["wins"] == 1
+    assert m["avg_return_pct"] == 3.0 and m["expectancy_pct"] == 3.0
+    assert m["profit_factor"] == 2.5
+    assert summarize_trades([]) == {"trades": 0}

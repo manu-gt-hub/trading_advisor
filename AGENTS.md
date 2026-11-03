@@ -97,7 +97,9 @@ regime rules, stop/trailing parameters) — **must** follow this procedure:
    (or diff against the latest `docs/BACKTEST_LOG.md` baseline entry).
 2. **After the change**: run `python run_backtest_all.py` again.
 3. **Compare** before vs after: win rate, avg return/trade, expectancy,
-   profit factor, exit-reason mix, MAE/MFE, and per-symbol breakdown.
+   profit factor, exit-reason mix, MAE/MFE, and per-symbol breakdown —
+   **in-sample and out-of-sample** (split at `backtest.oos_start`). Tune on
+   in-sample only; a change that degrades out-of-sample is reverted.
 4. **Report to the user** a clear before-vs-after table. Ask explicitly:
    keep or revert?
 5. Only on **user approval**: commit the change AND append a new dated entry to
