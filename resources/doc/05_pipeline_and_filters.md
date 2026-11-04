@@ -16,9 +16,9 @@ flowchart TD
     C -->|conf < threshold| X1[Discarded]
     C -->|conf >= threshold| P{Open position?}
     P -->|already holding| X6[Skip - open position]
-    P -->|not holding| RR{Risk/Reward >= 1.5?}
-    RR -->|R:R < 1.5| X5[BUY blocked]
-    RR -->|R:R >= 1.5| F{News / earnings filter}
+    P -->|not holding| RR{Risk/Reward >= 1.2?}
+    RR -->|R:R < 1.2| X5[BUY blocked]
+    RR -->|R:R >= 1.2| F{News / earnings filter}
     F -->|earnings soon or<br>negative news| X3[BUY blocked]
     F -->|no risks| G{Correlation > 0.75?}
     G -->|correlated| X4[Duplicate removed]
@@ -74,7 +74,7 @@ Loads the transactions; if the symbol already has a position without `sell_value
 - **Take-profit** = the **more conservative** of the `REVENUE_PERCENTAGE %` target and `price + 3*ATR`.
 - **R:R** = `(take_profit - price) / (price - stop_loss)`.
 
-The BUY is **blocked** if `R:R < 1.5`. If R:R is unknown (`NaN`), it is not blocked.
+The BUY is **blocked** if `R:R < MIN_RISK_REWARD_RATIO` (default 1.2). If R:R is unknown (`NaN`), it is not blocked.
 
 ## Step 9 — News and earnings (`tools/news_sentiment.py`)
 
@@ -100,7 +100,7 @@ If >= 2 BUYs remain, `filter_correlated_buys(buy_df, max_correlation=0.75)` grou
 | LLM audit | LLM flags INCOHERENT (-> HOLD) or lowers confidence |
 | Confidence | `technical_confidence < MIN_BUY_CONFIDENCE` |
 | Position | an open position for the symbol already exists |
-| R:R | `risk_reward_ratio < 1.5` |
+| R:R | `risk_reward_ratio < MIN_RISK_REWARD_RATIO` (default 1.2) |
 | News | upcoming earnings or strongly negative sentiment |
 | Correlation | correlation > 0.75 with another higher-confidence BUY |
 
