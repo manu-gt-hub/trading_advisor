@@ -6,6 +6,7 @@ google-auth>=2.62.0
 requests>=2.34.2
 httpx>=0.28.1
 openai>=3.42.0
+anthropic>=2.6.0
 python-dotenv>=1.2.4
 yfinance>=1.7.0
 pytz>=2026.6

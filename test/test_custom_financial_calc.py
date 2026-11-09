@@ -10,7 +10,7 @@ from tools.custom_financial_calc import evaluate_buy_interest
 # Utility function to load historical data from CSV
 def load_hist_data():
     current_dir = os.path.dirname(__file__)
-    csv_path = os.path.join(current_dir, '..', 'resources', 'historicals', 'msft_hist_data.csv')
+    csv_path = os.path.join(current_dir, '..', 'resources', 'historicals', 'MSFT.csv')
     return pd.read_csv(csv_path)
 
 @patch("tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)

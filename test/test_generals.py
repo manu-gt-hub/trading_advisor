@@ -187,3 +187,11 @@ def test_secret_redacting_filter_masks_env_secrets(monkeypatch):
     assert SecretRedactingFilter().filter(record) is True
     assert "supersecretkey123" not in record.getMessage()
     assert "AAPL" in record.getMessage()
+
+
+def test_secret_redacting_filter_masks_sheet_ids(monkeypatch):
+    import logging
+    monkeypatch.setenv("SHADOW_LOG_FILE_ID", "1AbCdEfGhIjKlMnOp")
+    record = logging.LogRecord("x", logging.INFO, __file__, 1, "Saved to Google Drive (file_id=%s)", ("1AbCdEfGhIjKlMnOp",), None)
+    SecretRedactingFilter().filter(record)
+    assert "1AbCdEfGhIjKlMnOp" not in record.getMessage()

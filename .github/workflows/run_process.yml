@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
 
       - name: configure python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -35,6 +35,7 @@ jobs:
           ALPHA_API_KEY: ${{ secrets.ALPHA_API_KEY }}
           GDRIVE_FILE_ID: ${{ secrets.GDRIVE_FILE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           BUY_RECOMMENDATIONS_ID: ${{ secrets.BUY_RECOMMENDATIONS_ID }}
           ANALYSIS_FILE_ID: ${{ secrets.ANALYSIS_FILE_ID }}
@@ -43,9 +44,14 @@ jobs:
           SYMBOLS_INTEREST_LIST: ${{ vars.SYMBOLS_INTEREST_LIST }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL }}
           FORCE_OPINION: ${{ vars.FORCE_OPINION }}
-          GPT_MODEL_NAME: ${{ vars.GPT_MODEL_NAME }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
           TRANSACTIONS_MAX_RECORDS: ${{ vars.TRANSACTIONS_MAX_RECORDS }}
           MIN_BUY_CONFIDENCE: ${{ vars.MIN_BUY_CONFIDENCE }}
           NEWS_SENT_ANALYSIS: ${{ vars.NEWS_SENT_ANALYSIS }}
           LLM_AUDIT_ENABLED: ${{ vars.LLM_AUDIT_ENABLED }}
+          MIN_RISK_REWARD_RATIO: ${{ vars.MIN_RISK_REWARD_RATIO }}
+          ENGINE_CONFIG_OVERRIDES: ${{ vars.ENGINE_CONFIG_OVERRIDES }}
+          SHADOW_MODE_ENABLED: ${{ vars.SHADOW_MODE_ENABLED }}
+          SHADOW_LOG_FILE_ID: ${{ secrets.SHADOW_LOG_FILE_ID }}
         run: python main.py

@@ -97,6 +97,18 @@
           "weight": 0.05,
           "optional": true,
           "norm": "Price in Fibonacci golden zone (38.2%-61.8% retracement); 0.6 near 61.8%, 0.3 near 38.2%"
+        },
+        "rs_market": {
+          "weight": 0.0,
+          "optional": true,
+          "params": { "lookback": 63, "scale": 5.0 },
+          "norm": "tanh(scale * excess return vs relative_strength.market_benchmark over lookback days); only when benchmark data available"
+        },
+        "rs_sector": {
+          "weight": 0.0,
+          "optional": true,
+          "params": { "lookback": 63, "scale": 5.0 },
+          "norm": "tanh(scale * excess return vs the symbol's sector ETF (relative_strength.sector_etfs)); only when mapped and data available"
         }
       }
     },
@@ -129,6 +141,17 @@
           "weight": 0.10,
           "optional": true,
           "norm": "S&P500 trend as risk: bearish market = 1.0 (high risk), bullish = 0.0 (low risk); only when SP500 data available"
+        },
+        "overextension": {
+          "weight": 0.0,
+          "params": { "start_atr": 1.5, "full_atr": 4.0 },
+          "norm": "(price - EMA20) / ATR14 mapped linearly from start_atr (0 risk) to full_atr (1.0 risk)"
+        },
+        "vix": {
+          "weight": 0.0,
+          "optional": true,
+          "params": { "low": 15.0, "high": 35.0 },
+          "norm": "VIX close mapped linearly from low (0 risk) to high (1.0 risk); only when VIX data available"
         }
       }
     }
@@ -159,7 +182,32 @@
     "max_holding_days": null,
     "max_correlation": 0.75,
     "correlation_lookback_days": 90,
-    "max_position_pct": 20.0
+    "max_position_pct": 20.0,
+    "exit_regimes": [],
+    "exit_regimes_note": "Close an open position at the current price when its regime becomes one of these (e.g. [\"TRENDING_DOWN\"]). Empty = disabled. Only symbols analysed in the run are checked."
+  },
+
+  "relative_strength": {
+    "description": "Benchmarks for the rs_market / rs_sector momentum factors. Fetched once per run (yfinance) only when a factor has weight > 0 or shadow mode is on.",
+    "market_benchmark": "SPY",
+    "sector_etfs": {
+      "MSFT": "XLK", "AAPL": "XLK", "NVDA": "XLK",
+      "META": "XLC", "GOOGL": "XLC",
+      "AMZN": "XLY", "HD": "XLY",
+      "KO": "XLP", "PG": "XLP",
+      "V": "XLF", "JPM": "XLF",
+      "XOM": "XLE",
+      "JNJ": "XLV", "UNH": "XLV",
+      "CAT": "XLI",
+      "NEE": "XLU",
+      "LIN": "XLB"
+    }
+  },
+
+  "market_data": {
+    "description": "Index series used for market context. Production fetches them live; the backtest reads resources/historicals/market/<name>.csv.",
+    "index": "^GSPC",
+    "vix": "^VIX"
   },
 
   "news_filter": {
@@ -177,7 +225,28 @@
     "min_history": 250,
     "step_days": 1,
     "oos_start": "2025-01-01",
+    "universe": ["MSFT", "AAPL", "NVDA", "META", "GOOGL", "AMZN", "HD", "KO", "PG", "V", "JPM", "XOM", "JNJ", "UNH", "CAT", "NEE", "LIN"],
     "oos_note": "Trades entered on/after oos_start are the out-of-sample holdout. Tune on in-sample only; accept a change only if out-of-sample does not degrade. The pre-2026-11 config was tuned on the full history, so its OOS figures are not a clean holdout."
+  },
+
+  "shadow_mode": {
+    "description": "Signals that are collected and logged every run but NEVER affect a decision. Enable with SHADOW_MODE_ENABLED=true; persist history with SHADOW_LOG_FILE_ID. Evaluate later with evals/run/analyze_shadow.py and only then promote a signal (Rule 1).",
+    "analyst_recommendations": true,
+    "earnings_surprise": true,
+    "news_sentiment": true,
+    "news_sentiment_days": 7,
+    "news_sentiment_max_calls": 20,
+    "news_sentiment_note": "Alpha Vantage NEWS_SENTIMENT (free tier: 25 requests/day, shared with the history fallback). BUY candidates are scored first.",
+    "request_pause_seconds": 1.0,
+    "max_log_rows": 20000
+  },
+
+  "llm": {
+    "description": "Provider and model come from the LLM_PROVIDER ('openai' | 'anthropic') and MODEL_NAME repository variables; these are the per-provider defaults when MODEL_NAME is unset, plus Anthropic request options. Claude models take no temperature: effort controls depth/cost. Set anthropic_effort / anthropic_fallbacks to null for older Claude models that reject them.",
+    "default_models": { "openai": "gpt-4o", "anthropic": "claude-opus-5-5" },
+    "anthropic_effort": "low",
+    "anthropic_max_tokens": 4096,
+    "anthropic_fallbacks": "default"
   },
 
   "llm_audit": {

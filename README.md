@@ -1,6 +1,6 @@
 # Trading Advisor
 
-Automated stock trading signal generator driven by a **deterministic layered technical engine**. The technical system is the **sole decision maker**; the LLM (GPT) only **audits** BUY signals. Runs daily via GitHub Actions and saves results to Google Drive.
+Automated stock trading signal generator driven by a **deterministic layered technical engine**. The technical system is the **sole decision maker**; the LLM (GPT) only **audits** BUY signals. Runs every market day via GitHub Actions and saves results to Google Drive.
 
 ## 🚀 Features
 
@@ -45,28 +45,29 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 ### Backtesting (`backtesting.py`)
 - Simulates signals over historical data **without look-ahead bias**
 - Measures win rate, average return, max drawdown per trade
-- Multi-stock backtest results (10% target, 30-day hold, 5 years):
-  - **NVDA**: 58.8% win rate, +10.43% avg return
-  - **META**: 47.9% win rate, +7.04% avg return
-  - **MSFT**: 24.4% win rate, +2.21% avg return
-  - System works best on volatile tech stocks
+- Replays the production pipeline: daily evaluation, ATR stop-loss, trailing stop, R:R and confidence filters, same exit rules
+- Current baseline (2026-10-31, 10% target, 7 symbols):
+  - **93 trades**, 22.6% hit the target, **+2.08% avg return per trade**, profit factor **2.88**
+  - **Out-of-sample** (entries since 2025-01-01): 21 trades, +1.64% avg return, profit factor 2.16
+  - **NVDA**: 20 trades, +3.58% avg return
+  - Below buy-and-hold on every symbol: the regime gate keeps the system out of the market most of the time
 - Run all backtests: `python run_backtest_all.py`
-- Normalize CSV formats: `python normalize_csvs.py`
+- Refresh backtest data (free, Yahoo Finance): `python download_historicals.py` (`--windows-certs` behind TLS interception)
 - **Architecture**: See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design with diagrams.
 - **Results log**: See [`docs/BACKTEST_LOG.md`](docs/BACKTEST_LOG.md) for historical results and change impact. **Must be updated** whenever the prediction engine is modified.
 - **AI agents**: [`AGENTS.md`](AGENTS.md) is the canonical harness file — mandatory backtest-before-commit workflow, architecture map, and conventions for any LLM/agent editing this repo.
 
 ### Infrastructure
-- **Daily execution** via GitHub Actions (scheduled cron)
+- **Execution every market day** via GitHub Actions (cron Monday to Friday; US holidays are skipped)
 - **Google Drive** integration for persisting analysis and recommendations
-- **93 tests**, fully mocked (no external API calls), ~12s execution
+- **160 tests**, mocked (no external API calls) except 3 Google Drive integration tests that skip without credentials
 
 ## 🛠️ Getting Started
 
 ### Prerequisites
 
 - Python 3.11+
-- API keys: OpenAI, Finnhub, Alpha Vantage
+- API keys: an LLM provider (OpenAI or Anthropic), Finnhub, Alpha Vantage
 - Google Drive service account credentials
 
 ### Installation
@@ -81,8 +82,10 @@ pip install -r requirements-dev.txt
 
 | Variable | Description |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `GPT_MODEL_NAME` | GPT model (e.g., `gpt-4o`) |
+| `LLM_PROVIDER` | LLM backend: `openai` (default) or `anthropic` |
+| `MODEL_NAME` | Model id (e.g. `gpt-4o`, `claude-opus-5-5`); defaults per provider in `resources/technical_config.json` → `llm` |
+| `OPENAI_API_KEY` | OpenAI API key (when `LLM_PROVIDER=openai`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (when `LLM_PROVIDER=anthropic`) |
 | `FINNHUB_API_KEY` | Finnhub API key |
 | `ALPHA_API_KEY` | Alpha Vantage API key |
 | `ALPHA_VANTAGE_URL` | Alpha Vantage base URL |
@@ -99,6 +102,9 @@ pip install -r requirements-dev.txt
 | `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
 | `MIN_RISK_REWARD_RATIO` | Minimum risk/reward ratio to accept a BUY (default `1.2`) |
 | `NEWS_SENT_ANALYSIS` | Enable news sentiment filter (`true`/`false`, default `false`) |
+| `ENGINE_CONFIG_OVERRIDES` | JSON that overrides any value of `resources/technical_config.json` without a code change, e.g. `{"risk_management.exit_regimes": ["TRENDING_DOWN"]}` (see `resources/doc/06_configuration.md`) |
+| `SHADOW_MODE_ENABLED` | Collect shadow signals (analysts, EPS surprise, news sentiment, relative strength, VIX) without affecting decisions (`true`/`false`, default `false`) |
+| `SHADOW_LOG_FILE_ID` | Google Sheet that accumulates the shadow log (secret; share it with the service account) |
 
 ### Usage
 
@@ -147,8 +153,8 @@ flowchart TD
     C -->|conf >= threshold| P{Position<br>tracking}
     P -->|already holding| X6[Skip - open position]
     P -->|not holding| RR{Risk/Reward<br>ratio filter}
-    RR -->|R:R < 1.5| X5[BUY blocked]
-    RR -->|R:R >= 1.5| F{News sentiment<br>filter}
+    RR -->|R:R < 1.2| X5[BUY blocked]
+    RR -->|R:R >= 1.2| F{News sentiment<br>filter}
     F -->|earnings soon or<br>negative news| X3[BUY blocked]
     F -->|no risks| G{Correlation<br>filter}
     G -->|Pearson > 0.75| X4[Duplicate removed]

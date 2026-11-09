@@ -7,7 +7,9 @@
 | `SYMBOLS_INTEREST_LIST` | Python-list literal, e.g. `"['NVDA','MSFT']"` — **US exchanges only** (Finnhub free) |
 | `FINNHUB_API_KEY` | Quotes + news |
 | `OPENAI_API_KEY` | GPT audit + news sentiment |
-| `GPT_MODEL_NAME` | default `gpt-4o` |
+| `LLM_PROVIDER` | `openai` (default) or `anthropic` — backend for the BUY audit and news sentiment |
+| `MODEL_NAME` | model id; when unset, `llm.default_models` in the config (`gpt-4o` / `claude-opus-5-5`). Legacy `GPT_MODEL_NAME` is still read |
+| `ANTHROPIC_API_KEY` | needed only with `LLM_PROVIDER=anthropic` (secret) |
 | `GDRIVE_CREDENTIALS_JSON` | Service-account JSON |
 | `GDRIVE_FILE_ID` | Transactions sheet |
 | `BUY_RECOMMENDATIONS_ID` | Buy recommendations sheet |
@@ -25,6 +27,9 @@
 | `FORCE_OPINION` | DEFAULT | DEFAULT / CUSTOM (legacy LLM1/LLM2 fall back to DEFAULT) |
 | `TRANSACTIONS_MAX_RECORDS` | 100 | Sheet cap |
 | `LOG_LEVEL` | INFO | Logging |
+| `ENGINE_CONFIG_OVERRIDES` | `{}` | JSON `{"dotted.path": value}` overriding `technical_config.json` (unknown paths / type changes are rejected and logged). Engine values = engine change |
+| `SHADOW_MODE_ENABLED` | false | Collect shadow signals (never decide) |
+| `SHADOW_LOG_FILE_ID` | — | Sheet that accumulates the shadow log (secret, like the other Sheet IDs) |
 
 ## Data feeds
 

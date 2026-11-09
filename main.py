@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import logging
 from tools import google_handler, finnhub_client, historicals, custom_financial_calc as cfc, general, llms, news_sentiment
+from tools import shadow_signals, technical_engine, llm_client
 from tools.risk_management import compute_stop_loss_take_profit, filter_correlated_buys
 
 
@@ -14,6 +15,39 @@ TRANSACTION_COLUMN_ORDER = [
     'buy_sell_days_diff', 'percentage_benefit', 'stop_loss', 'take_profit',
     'highest_price', 'risk_reward_ratio', 'tradingview_url',
 ]
+
+
+def _env_number(name, default, cast=float):
+    """Numeric env var; unset or blank (GitHub passes undefined vars as '') -> default."""
+    raw = os.environ.get(name, "")
+    return cast(raw) if raw.strip() else default
+
+
+REQUIRED_ENV = ["SYMBOLS_INTEREST_LIST", "FINNHUB_API_KEY", "GDRIVE_CREDENTIALS_JSON", "GDRIVE_FILE_ID",
+                "BUY_RECOMMENDATIONS_ID", "ANALYSIS_FILE_ID", "REVENUE_PERCENTAGE"]
+
+
+def missing_env():
+    """
+    Names (never values: the Actions log of this public repo is public) of the
+    variables this run needs but that are unset or blank.
+    """
+    def unset(name):
+        return not os.environ.get(name, "").strip()
+
+    def enabled(name):
+        return os.environ.get(name, "").lower() == "true"
+
+    missing = [n for n in REQUIRED_ENV if unset(n)]
+    if enabled("LLM_AUDIT_ENABLED") or enabled("NEWS_SENT_ANALYSIS"):
+        try:
+            key = llm_client.api_key_env()
+            missing += [key] if unset(key) else []
+        except llm_client.LLMError:
+            missing.append("LLM_PROVIDER (unsupported value)")
+    if enabled("SHADOW_MODE_ENABLED"):
+        missing += [n for n in ("SHADOW_LOG_FILE_ID", "ALPHA_API_KEY") if unset(n)]
+    return missing
 
 
 def load_config():
@@ -27,22 +61,55 @@ def load_config():
     logging.basicConfig(level=log_level)
     general.install_secret_redaction()
     logger = logging.getLogger(__name__)
+    missing = missing_env()
+    if missing:
+        logger.warning(f"⚠️ Config check — unset variables: {', '.join(missing)}")
+    else:
+        logger.info("✅ Config check — all required variables are set")
 
     return {
         "logger": logger,
         "symbols_interest_list": ast.literal_eval(os.environ.get("SYMBOLS_INTEREST_LIST", "[]")),
         "revenue_percentage": float(os.environ.get("REVENUE_PERCENTAGE", 0)) if os.environ.get("REVENUE_PERCENTAGE") else None,
-        "max_records": int(os.environ.get("TRANSACTIONS_MAX_RECORDS", 100)),
+        "max_records": _env_number("TRANSACTIONS_MAX_RECORDS", 100, int),
         "transactions_file_id": os.environ.get("GDRIVE_FILE_ID"),
         "buy_file_id": os.environ.get("BUY_RECOMMENDATIONS_ID"),
         "analysis_file_id": os.environ.get("ANALYSIS_FILE_ID"),
         "force_opinion": os.environ.get("FORCE_OPINION"),
-        "min_buy_confidence": float(os.environ.get("MIN_BUY_CONFIDENCE", 0.6)),
-        "min_risk_reward_ratio": float(os.environ.get("MIN_RISK_REWARD_RATIO", 1.2)),
+        "min_buy_confidence": _env_number("MIN_BUY_CONFIDENCE", 0.6),
+        "min_risk_reward_ratio": _env_number("MIN_RISK_REWARD_RATIO", 1.2),
         "news_sent_analysis": os.environ.get("NEWS_SENT_ANALYSIS", "false").lower() == "true",
+        "shadow_log_file_id": os.environ.get("SHADOW_LOG_FILE_ID"),
     }
 
-def analyze_symbol(symbol_data, sp500_override=None):
+def build_market_context(symbols):
+    """
+    Live inputs for the optional market factors (VIX, relative strength vs SPY and
+    sector ETFs), fetched once per run and only when something uses them: a factor
+    with weight > 0 or shadow mode. Returns {symbol: market_context}.
+    """
+    cfg = technical_engine.load_config()
+    weight = lambda layer, name: cfg["layers"][layer]["indicators"].get(name, {}).get("weight", 0) or 0
+    shadow = shadow_signals.is_enabled()
+    want_rs = shadow or weight("momentum", "rs_market") > 0 or weight("momentum", "rs_sector") > 0
+    want_vix = shadow or weight("risk", "vix") > 0
+    if not (want_rs or want_vix):
+        return {}
+
+    rs_cfg = cfg.get("relative_strength", {})
+    vix_series = historicals.get_close_series(cfg.get("market_data", {}).get("vix", "^VIX"), "1mo") if want_vix else None
+    vix = float(vix_series.iloc[-1]) if vix_series is not None and len(vix_series) else None
+    market = historicals.get_close_series(rs_cfg.get("market_benchmark", "SPY")) if want_rs else None
+    sector_map = rs_cfg.get("sector_etfs", {})
+    etfs = {sector_map[s] for s in symbols if s in sector_map} if want_rs else set()
+    sector_series = {etf: historicals.get_close_series(etf) for etf in sorted(etfs)}
+    return {
+        s: {"vix": vix, "benchmarks": {"market": market, "sector": sector_series.get(sector_map.get(s))}}
+        for s in symbols
+    }
+
+
+def analyze_symbol(symbol_data, sp500_override=None, market_context=None):
     """Analyze a single stock symbol. Returns None if analysis fails."""
     symbol = symbol_data['symbol']
     current_price = symbol_data['current_price']
@@ -55,7 +122,8 @@ def analyze_symbol(symbol_data, sp500_override=None):
             logging.getLogger(__name__).warning(f"⚠️ No historical data for {symbol}. Skipping.")
             return None
 
-        metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price, sp500_override=sp500_override)
+        metrics = cfc.evaluate_buy_interest(symbol, hist_data, current_price, sp500_override=sp500_override,
+                                            market_context=market_context)
 
         return {
             "symbol": symbol,
@@ -133,6 +201,8 @@ def enrich_analysis_df(df, analysis, force_opinion):
 
             # Store decision reason (explains why not BUY, or confirms BUY)
             df.loc[df['symbol'] == symbol, 'decision_reason'] = metrics.get('decision_reason', '')
+            # Regime drives the optional regime exit when the open-position review runs
+            df.loc[df['symbol'] == symbol, 'regime'] = metrics.get('regime')
 
             # Compute stop-loss and take-profit levels
             sl_tp = compute_stop_loss_take_profit(item['current_price'], sigs.get('ATR_14'), revenue_percentage=rev_pct)
@@ -256,7 +326,9 @@ def main(show_dataframes=False):
 
     # S&P500 context is the same for every symbol: fetch it once per run
     sp500 = cfc._get_sp500_trend()
-    analysis_results = [r for r in (analyze_symbol(data, sp500) for data in symbols_info_list) if r is not None]
+    contexts = build_market_context([d["symbol"] for d in symbols_info_list])
+    analysis_results = [r for r in (analyze_symbol(d, sp500, contexts.get(d["symbol"])) for d in symbols_info_list)
+                        if r is not None]
 
     # Enrich analysis_df with opinions
     analysis_df = enrich_analysis_df(analysis_df, analysis_results, config["force_opinion"])
@@ -264,6 +336,8 @@ def main(show_dataframes=False):
     # Ensure news columns always exist in the saved output, even when there are no
     # BUY candidates (the news filter below only populates them for BUY rows).
     analysis_df['news_sentiment'] = "Not evaluated (no BUY candidate)"
+    analysis_df['news_sentiment_label'] = None
+    analysis_df['news_sentiment_confidence'] = None
     analysis_df['earnings_soon'] = False
     analysis_df['filter_status'] = ''
 
@@ -317,6 +391,10 @@ def main(show_dataframes=False):
                 # Write sentiment back to analysis_df so it appears in Google Drive
                 mask = analysis_df['symbol'] == row['symbol']
                 analysis_df.loc[mask, 'news_sentiment'] = news_result['news_sentiment']['summary']
+                # Structured copy so the (never backtested) filter can be measured via shadow mode
+                if news_result['news_sentiment'].get('sentiment') and config["news_sent_analysis"]:
+                    analysis_df.loc[mask, 'news_sentiment_label'] = news_result['news_sentiment']['sentiment']
+                    analysis_df.loc[mask, 'news_sentiment_confidence'] = news_result['news_sentiment']['confidence']
                 analysis_df.loc[mask, 'earnings_soon'] = news_result['earnings_soon']
                 if news_result['block_buy']:
                     blocked[row['symbol']] = news_result['reason']
@@ -346,6 +424,18 @@ def main(show_dataframes=False):
         analysis_df.loc[analysis_df['symbol'] == sym, 'filter_status'] = '✅ passed all filters'
 
     logger.info(f"📊 Final BUY list: {list(buy_df['symbol'])} ({len(buy_df)} stocks)")
+
+    # Shadow mode runs after every decision is final and only adds information
+    if shadow_signals.is_enabled():
+        try:
+            shadow_df = shadow_signals.collect(analysis_df, analysis_results, now_madrid)
+            analysis_df = shadow_signals.add_shadow_columns(analysis_df, shadow_df)
+            shadow_signals.append_log(
+                shadow_df, config["shadow_log_file_id"],
+                int(technical_engine.load_config().get("shadow_mode", {}).get("max_log_rows", 20000)),
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Shadow mode failed (decisions unaffected): {e}")
 
     # Update and save all outputs
     update_and_save_transactions(config, analysis_df, buy_df, transactions_df)

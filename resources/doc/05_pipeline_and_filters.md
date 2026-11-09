@@ -16,9 +16,9 @@ flowchart TD
     C -->|conf < threshold| X1[Discarded]
     C -->|conf >= threshold| P{Open position?}
     P -->|already holding| X6[Skip - open position]
-    P -->|not holding| RR{Risk/Reward >= 1.5?}
-    RR -->|R:R < 1.5| X5[BUY blocked]
-    RR -->|R:R >= 1.5| F{News / earnings filter}
+    P -->|not holding| RR{Risk/Reward >= 1.2?}
+    RR -->|R:R < 1.2| X5[BUY blocked]
+    RR -->|R:R >= 1.2| F{News / earnings filter}
     F -->|earnings soon or<br>negative news| X3[BUY blocked]
     F -->|no risks| G{Correlation > 0.75?}
     G -->|correlated| X4[Duplicate removed]
@@ -74,7 +74,7 @@ Loads the transactions; if the symbol already has a position without `sell_value
 - **Take-profit** = the **more conservative** of the `REVENUE_PERCENTAGE %` target and `price + 3*ATR`.
 - **R:R** = `(take_profit - price) / (price - stop_loss)`.
 
-The BUY is **blocked** if `R:R < 1.5`. If R:R is unknown (`NaN`), it is not blocked.
+The BUY is **blocked** if `R:R < MIN_RISK_REWARD_RATIO` (default 1.2). If R:R is unknown (`NaN`), it is not blocked.
 
 ## Step 9 — News and earnings (`tools/news_sentiment.py`)
 
@@ -93,6 +93,37 @@ If >= 2 BUYs remain, `filter_correlated_buys(buy_df, max_correlation=0.75)` grou
 - **Buy Recommendations** (Google Drive): symbols that passed all filters + `buy_date`, `stop_loss`, `take_profit`, `risk_reward_ratio`, `tradingview_url`.
 - **Analysis**: all symbols with their evaluation, confidence, labels and `action`.
 
+## Market context (once per run)
+
+`main.build_market_context` downloads, only when something uses them (a candidate
+factor with weight > 0, or shadow mode):
+
+- VIX (`market_data.vix`, default `^VIX`)
+- the market benchmark (`relative_strength.market_benchmark`, default `SPY`)
+- the sector ETFs of the analysed symbols (`relative_strength.sector_etfs`)
+
+All from Yahoo Finance (free). The S&P500 trend (`market_data.index`) is always fetched.
+
+## Shadow mode (`tools/shadow_signals.py`)
+
+With `SHADOW_MODE_ENABLED=true`, after every decision is final, one row per analysed
+symbol is collected and **never used to decide anything**:
+
+| Signal | Source (free) |
+|---|---|
+| `rs_market`, `rs_sector`, `overextension`, `vix` | engine candidate factors |
+| `analyst_score` (−2..+2), `analyst_score_change`, `analyst_count` | Finnhub `/stock/recommendation` |
+| `eps_surprise_pct`, `eps_surprise_avg4`, `eps_beats4` | Finnhub `/stock/earnings` |
+| `news_sentiment_score` (−1..+1), `news_articles` | Alpha Vantage `NEWS_SENTIMENT` (25 calls/day; BUY candidates first) |
+
+Rows are appended to the sheet `SHADOW_LOG_FILE_ID` (if set) and copied into the
+analysis sheet as `shadow_*` columns. A failure only logs a warning. A failed read
+of the log never overwrites it.
+
+Evaluate after a few months with `python evals/run/analyze_shadow.py --from-drive`
+(Spearman IC and quintile spreads vs 5/10/20-day forward returns). A signal that
+looks predictive is promoted through a backtest like any engine change.
+
 ## Block map (everything that can stop a BUY)
 
 | Stage | Blocks BUY if... |
@@ -100,7 +131,7 @@ If >= 2 BUYs remain, `filter_correlated_buys(buy_df, max_correlation=0.75)` grou
 | LLM audit | LLM flags INCOHERENT (-> HOLD) or lowers confidence |
 | Confidence | `technical_confidence < MIN_BUY_CONFIDENCE` |
 | Position | an open position for the symbol already exists |
-| R:R | `risk_reward_ratio < 1.5` |
+| R:R | `risk_reward_ratio < MIN_RISK_REWARD_RATIO` (default 1.2) |
 | News | upcoming earnings or strongly negative sentiment |
 | Correlation | correlation > 0.75 with another higher-confidence BUY |
 
