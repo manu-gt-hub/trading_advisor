@@ -200,7 +200,10 @@
       "JNJ": "XLV", "UNH": "XLV",
       "CAT": "XLI",
       "NEE": "XLU",
-      "LIN": "XLB"
+      "LIN": "XLB",
+      "INTC": "XLK",
+      "TSLA": "XLY", "MCD": "XLY",
+      "PLD": "XLRE"
     }
   },
 
@@ -225,7 +228,7 @@
     "min_history": 250,
     "step_days": 1,
     "oos_start": "2025-01-01",
-    "universe": ["MSFT", "AAPL", "NVDA", "META", "GOOGL", "AMZN", "HD", "KO", "PG", "V", "JPM", "XOM", "JNJ", "UNH", "CAT", "NEE", "LIN"],
+    "universe": ["MSFT", "AAPL", "NVDA", "META", "GOOGL", "AMZN", "HD", "KO", "PG", "V", "JPM", "XOM", "JNJ", "UNH", "CAT", "NEE", "LIN", "INTC", "TSLA", "MCD", "PLD", "SPY"],
     "oos_note": "Trades entered on/after oos_start are the out-of-sample holdout. Tune on in-sample only; accept a change only if out-of-sample does not degrade. The pre-2026-11 config was tuned on the full history, so its OOS figures are not a clean holdout."
   },
 
