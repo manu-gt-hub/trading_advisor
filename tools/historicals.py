@@ -232,3 +232,15 @@ def create_hist_data():
     })
 
     return df
+
+
+def get_close_series(ticker: str, period: str = "1y"):
+    """
+    Daily closes for a benchmark / index (e.g. SPY, XLK, ^VIX) from Yahoo Finance,
+    indexed by calendar day (custom_financial_calc.to_day_index). None on failure.
+    """
+    from tools.custom_financial_calc import to_day_index
+    data = get_hist_data_from_yahoo(ticker, period=period)
+    if data is None or data.empty or "Close" not in data.columns:
+        return None
+    return pd.Series(data["Close"].astype(float).values, index=to_day_index(data.index)).sort_index()

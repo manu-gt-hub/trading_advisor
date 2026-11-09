@@ -63,8 +63,9 @@ def get_drive_service():
     service = build("drive", "v3", credentials=credentials)
     return service
 
-def load_data(file_id):
-    # Load CSV data exported from Google Sheets on Google Drive
+def load_data(file_id, allow_empty=False):
+    # Load CSV data exported from Google Sheets on Google Drive.
+    # allow_empty=True returns an empty DataFrame for a blank sheet (None still means error).
     if not file_id:
         raise Exception("Environment variable GDRIVE_FILE_ID not found")
     service = get_drive_service()
@@ -79,7 +80,13 @@ def load_data(file_id):
 
         file_bytes = fh.getvalue()
 
-        df = pd.read_csv(io.BytesIO(file_bytes))
+        try:
+            df = pd.read_csv(io.BytesIO(file_bytes))
+        except pd.errors.EmptyDataError:
+            if not allow_empty:
+                raise
+            logger.info("✅ Sheet is empty (new file).")
+            return pd.DataFrame()
         logger.info(f"✅ CSV loaded from Google Drive (Google Sheets export) with {len(df)} rows.")
 
     except Exception as e:
@@ -160,8 +167,11 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
             # Look for the symbol in the analysis dataframe
             analysis_row = df_analysis[df_analysis['symbol'] == symbol]
 
+            regime = None
             if not analysis_row.empty:
                 current_price = analysis_row.iloc[0]['current_price']
+                if 'regime' in analysis_row.columns and isinstance(analysis_row.iloc[0]['regime'], str):
+                    regime = analysis_row.iloc[0]['regime']
             else:
                 # Symbol not in current analysis run (e.g. removed from interest list).
                 # Fetch live price so open positions are still reviewed for exit.
@@ -182,7 +192,7 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
 
             # Trailing stop + exit rules are shared with the backtester
             pos = update_open_position(
-                buy_value, row.get('stop_loss'), row.get('highest_price'), current_price, target_price
+                buy_value, row.get('stop_loss'), row.get('highest_price'), current_price, target_price, regime
             )
             if pos['highest_changed']:
                 df_transactions.at[idx, 'highest_price'] = pos['highest_price']
@@ -205,6 +215,8 @@ def update_transactions(df_analysis, df_transactions, revenue_percentage):
                 sell_reason = pos['exit_reason']
                 if sell_reason == 'stop_loss':
                     logger.info(f"🛑 Stop-loss triggered for {symbol}: price {current_price:.2f} <= stop {exit_price:.2f}")
+                elif sell_reason == 'regime_exit':
+                    logger.info(f"🔻 Regime exit for {symbol}: regime={regime}, price {current_price:.2f}")
                 else:
                     logger.info(f"🎯 Take-profit hit for {symbol}: price {current_price:.2f} >= target {target_price:.2f}")
 

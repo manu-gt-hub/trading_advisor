@@ -4,8 +4,8 @@ The system splits the analysis into **three layers with a clear hierarchy**. Eac
 
 | Layer | Scale | Meaning | Layer weight |
 |---|---|---|---|
-| `trend` | `[-1, 1]` | Directional structure of price | `0.55` |
-| `momentum` | `[-1, 1]` | Speed/strength of the move | `0.45` |
+| `trend` | `[-1, 1]` | Directional structure of price | `0.45` |
+| `momentum` | `[-1, 1]` | Speed/strength of the move | `0.55` |
 | `risk` | `[0, 1]` | Penalty (0 = no risk, 1 = max risk) | — (penalizes) |
 
 ```mermaid
@@ -55,7 +55,7 @@ Measures whether the price structure is bullish or bearish.
 | `price_vs_ema20_sma50` | 0.15 | `+1` if price > EMA20 and > SMA50; `-1` if < both; `0` mixed |
 | `ma50_slope` | 0.10 | `clip(tanh((MA50_slope / |price|) * 100), -1, 1)` |
 | `adx_direction` | 0.15 | `clip(((+DI - -DI)/(+DI + -DI)) * min(ADX/40, 1), -1, 1)` |
-| `weekly_confirmation` | 0.20 *(optional)* | `clip(0.5*(MA10w>MA30w ? +1 : -1) + 0.5*(price>MA10w ? +1 : -1), -1, 1)` |
+| `weekly_confirmation` | 0.10 *(optional)* | `clip(0.5*(MA10w>MA30w ? +1 : -1) + 0.5*(price>MA10w ? +1 : -1), -1, 1)` |
 
 **`weekly_confirmation` (multi-timeframe confirmation):** confirms the daily trend against the **weekly** one (weekly MA10/MA30 and price vs weekly MA10). It reduces false BUYs caused by daily noise. It is **optional**: if there is insufficient weekly history (`_compute_weekly_confirmation` returns `None`), the factor is omitted and the remaining trend weights are renormalized.
 
@@ -73,6 +73,8 @@ Measures the strength of the move. **RSI and MACD are PRIMARY** (high weight); *
 | `macd` | primary | 0.35 | `clip(0.5*sign(MACD-Signal) + 0.25*sign(hist_slope) + 0.25*cross, -1, 1)` |
 | `stoch_rsi` | secondary | 0.15 | `clip((%K - 50) / 50, -1, 1)` |
 | `roc` | secondary | 0.15 | `clip(tanh(ROC * 10), -1, 1)` |
+| `rs_market` | candidate | 0.00 *(optional)* | `tanh(5 * excess)`, excess = symbol return / SPY return − 1 over 63 days |
+| `rs_sector` | candidate | 0.00 *(optional)* | same vs the symbol's sector ETF (`relative_strength.sector_etfs`) |
 
 `macd` detail:
 - `sign(MACD - Signal)` -> +/-0.5 (MACD above/below its signal).
@@ -93,6 +95,21 @@ Risk penalty. **Volume and divergences live HERE**, not in momentum. `0` = no ri
 | `volume_confirmation` | 0.25 | `+0.5` if volume < 20-day volume SMA; `+0.5` if OBV < 20-day OBV SMA; `0.3` if no volume data |
 | `overbought` | 0.25 | `clip((RSI - 70)/30, 0, 1)`; raised to `>= 0.6` if price touches/exceeds the upper Bollinger band |
 | `divergence` | 0.25 | `1.0` if bearish price/OBV or price/RSI divergence; `0` otherwise |
+| `overextension` | 0.00 *(candidate)* | `(price − EMA20) / ATR14`, mapped linearly from 1.5 ATR (0) to 4 ATR (1) |
+| `vix` | 0.00 *(candidate, optional)* | VIX mapped linearly from 15 (0) to 35 (1) |
+
+### Candidate factors (weight 0)
+
+`rs_market`, `rs_sector`, `overextension` and `vix` are computed on every run but
+have **weight 0**, so they do not move any score: `_weighted_average` adds
+`value × 0` to the sum and `0` to the total weight. They exist so that
+
+- shadow mode logs them daily (live evidence), and
+- an experiment can switch them on without code changes, e.g.
+  `ENGINE_CONFIG_OVERRIDES='{"layers.momentum.indicators.rs_sector.weight": 0.15}'`.
+
+A weight only becomes non-zero in the committed config after it passes the
+in-sample **and** out-of-sample backtest (see `docs/BACKTEST_LOG.md`).
 
 **Bearish divergence** (`_detect_bearish_divergence`): price makes a higher high while OBV or RSI makes a lower high within a 14-bar window -> exhaustion signal -> **risk**, never momentum.
 

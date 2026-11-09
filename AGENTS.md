@@ -49,20 +49,24 @@ tools/custom_financial_calc.py   # Indicator computation → feature vector → 
 tools/finnhub_client.py          # Finnhub quotes (free plan = US exchanges only)
 tools/risk_management.py         # ATR stop-loss/take-profit, R:R, sizing, correlation,
                                  # update_open_position (exit rules shared with backtest)
-tools/llms.py                    # GPT auditor (audit_buy_signal)
+tools/llms.py                    # LLM auditor (audit_buy_signal)
+tools/llm_client.py              # Provider-neutral LLM call (LLM_PROVIDER: openai | anthropic)
 tools/news_sentiment.py          # Earnings/news filter (Finnhub + GPT)
 tools/backtesting.py             # Backtester: simulates signals, tracks MAE/MFE per trade
 tools/google_handler.py          # Google Drive I/O, open-position tracking, trailing stop
-tools/historicals.py             # Alpha Vantage historical data fetch
+tools/historicals.py             # Yahoo history (Alpha Vantage fallback), live benchmark closes
+tools/shadow_signals.py          # Shadow mode: logged-only candidate signals (never decide)
 tools/general.py                 # 'action' column, NYSE calendar, TLS + log-redaction helpers
 
 resources/technical_config.json  # ALL indicator params, weights, regime rules, thresholds
 resources/symbols_markets.json   # symbol → exchange map (for TradingView URLs)
-resources/historicals/           # CSVs used by the backtester
+resources/historicals/           # <SYMBOL>.csv per universe symbol + market/ (GSPC, VIX, SPY, sector ETFs)
+download_historicals.py          # Refresh the backtest data set from Yahoo Finance (free)
 resources/doc/*.md               # Detailed engine documentation (index in resources/doc/README.md)
 docs/ARCHITECTURE.md             # System architecture: services, daily run, filters, position lifecycle, backtest parity
 
-run_backtest_all.py              # Runs the backtest over all CSVs (ENTRY POINT for validation)
+run_backtest_all.py              # Runs the backtest over backtest.universe (ENTRY POINT for validation)
+evals/run/analyze_shadow.py      # Judges shadow signals against realised forward returns
 docs/BACKTEST_LOG.md             # Single source of truth for engine quality (dated sections)
 test/test_*.py                   # pytest suite (offline; conftest blocks yfinance)
 ```
@@ -179,7 +183,8 @@ python main.py
 |---|---|
 | `SYMBOLS_INTEREST_LIST` | Python-list literal of tickers (US exchanges only for Finnhub free) |
 | `FINNHUB_API_KEY` | Quotes + news (free tier: NYSE/NASDAQ only, no `.L`/`.DE`/`.PA`) |
-| `OPENAI_API_KEY`, `GPT_MODEL_NAME` | GPT audit + news sentiment (default `gpt-4o`) |
+| `LLM_PROVIDER`, `MODEL_NAME` | LLM backend (`openai` default, or `anthropic`) and model for the BUY audit + news sentiment; defaults in `llm.default_models` |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Key of the selected provider (all LLM calls go through `tools/llm_client.py`) |
 | `GDRIVE_FILE_ID`, `BUY_RECOMMENDATIONS_ID`, `ANALYSIS_FILE_ID`, `GDRIVE_CREDENTIALS_JSON` | Google Drive I/O |
 | `REVENUE_PERCENTAGE` | Take-profit target % (e.g. `10`) |
 | `MIN_BUY_CONFIDENCE` | Min confidence for BUY (engine + post-audit filter; backtest reads it too) |
@@ -189,6 +194,8 @@ python main.py
 | `FORCE_OPINION` | `DEFAULT` / `CUSTOM` (legacy `LLM1`/`LLM2` fall back to `DEFAULT`) |
 | `ALPHA_API_KEY`, `ALPHA_VANTAGE_URL` | Historical data refresh |
 | `LOG_LEVEL`, `DISABLE_SSL_VERIFY` | Ops |
+| `ENGINE_CONFIG_OVERRIDES` | JSON `{"dotted.path": value}` overriding any `technical_config.json` value at runtime. **Changing an engine value this way is an engine change (Rule 1)** |
+| `SHADOW_MODE_ENABLED`, `SHADOW_LOG_FILE_ID` | Shadow mode switch and the sheet that accumulates its log |
 
 Backtest (`run_backtest_all.py`) works fully offline from `resources/historicals/*.csv`.
 
@@ -200,8 +207,16 @@ Backtest (`run_backtest_all.py`) works fully offline from `resources/historicals
   30-day hold). Per-symbol results differ a lot — always check the per-symbol
   table, not just the consolidated row.
 - **Backtest ≠ production in a few known places**: no LLM audit, news filter,
-  correlation filter or valuation adjustment, and S&P500 context is mocked
-  NEUTRAL (no historical index data). Everything else is the same code path.
+  correlation filter, valuation adjustment or shadow signals. S&P500 trend, VIX
+  and relative-strength benchmarks are replayed point-in-time from
+  `resources/historicals/market/`. Everything else is the same code path.
+- **Candidate factors have weight 0** (`rs_market`, `rs_sector`, `overextension`,
+  `vix`). Tested on 2026-11-09 (one change each, 17 symbols): none
+  improved the backtest enough to be adopted, so all stay at weight 0. They are computed and logged but do not affect scores. Give them weight
+  only through the backtest procedure — a weight 0 → non-zero change is an engine
+  change.
+- **Shadow mode must never influence a decision.** Do not read `shadow_*`
+  columns in the decision path; promote a signal into the engine instead.
 - **Look-ahead bias**: the backtester slices history per evaluation day. If you
   modify `backtesting.py`, preserve the `min_history`-gated windowing.
 - **Exit logic lives in one place**: change `risk_management.update_open_position`,

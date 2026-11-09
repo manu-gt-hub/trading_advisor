@@ -52,7 +52,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
   - **NVDA**: 20 trades, +3.58% avg return
   - Below buy-and-hold on every symbol: the regime gate keeps the system out of the market most of the time
 - Run all backtests: `python run_backtest_all.py`
-- Normalize CSV formats: `python normalize_csvs.py`
+- Refresh backtest data (free, Yahoo Finance): `python download_historicals.py` (`--windows-certs` behind TLS interception)
 - **Architecture**: See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design with diagrams.
 - **Results log**: See [`docs/BACKTEST_LOG.md`](docs/BACKTEST_LOG.md) for historical results and change impact. **Must be updated** whenever the prediction engine is modified.
 - **AI agents**: [`AGENTS.md`](AGENTS.md) is the canonical harness file — mandatory backtest-before-commit workflow, architecture map, and conventions for any LLM/agent editing this repo.
@@ -67,7 +67,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 ### Prerequisites
 
 - Python 3.11+
-- API keys: OpenAI, Finnhub, Alpha Vantage
+- API keys: an LLM provider (OpenAI or Anthropic), Finnhub, Alpha Vantage
 - Google Drive service account credentials
 
 ### Installation
@@ -82,8 +82,10 @@ pip install -r requirements-dev.txt
 
 | Variable | Description |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `GPT_MODEL_NAME` | GPT model (e.g., `gpt-4o`) |
+| `LLM_PROVIDER` | LLM backend: `openai` (default) or `anthropic` |
+| `MODEL_NAME` | Model id (e.g. `gpt-4o`, `claude-opus-5-5`); defaults per provider in `resources/technical_config.json` → `llm` |
+| `OPENAI_API_KEY` | OpenAI API key (when `LLM_PROVIDER=openai`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (when `LLM_PROVIDER=anthropic`) |
 | `FINNHUB_API_KEY` | Finnhub API key |
 | `ALPHA_API_KEY` | Alpha Vantage API key |
 | `ALPHA_VANTAGE_URL` | Alpha Vantage base URL |
@@ -100,6 +102,9 @@ pip install -r requirements-dev.txt
 | `TRANSACTIONS_MAX_RECORDS` | Max rows in transactions sheet (default 100) |
 | `MIN_RISK_REWARD_RATIO` | Minimum risk/reward ratio to accept a BUY (default `1.2`) |
 | `NEWS_SENT_ANALYSIS` | Enable news sentiment filter (`true`/`false`, default `false`) |
+| `ENGINE_CONFIG_OVERRIDES` | JSON that overrides any value of `resources/technical_config.json` without a code change, e.g. `{"risk_management.exit_regimes": ["TRENDING_DOWN"]}` (see `resources/doc/06_configuration.md`) |
+| `SHADOW_MODE_ENABLED` | Collect shadow signals (analysts, EPS surprise, news sentiment, relative strength, VIX) without affecting decisions (`true`/`false`, default `false`) |
+| `SHADOW_LOG_FILE_ID` | Google Sheet that accumulates the shadow log (secret; share it with the service account) |
 
 ### Usage
 

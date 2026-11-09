@@ -82,10 +82,11 @@ class TestAuditBuySignal:
 
     @patch.dict(os.environ, {
         "OPENAI_API_KEY": "fake-key",
-        "GPT_MODEL_NAME": "gpt-4o",
+        "MODEL_NAME": "gpt-4o",
+        "LLM_PROVIDER": "openai",
         "REVENUE_PERCENTAGE": "10",
     })
-    @patch("llms.OpenAI")
+    @patch("openai.OpenAI")
     def test_coherent_audit_returns_positive_adjustment(self, mock_openai_class):
         mock_client = MagicMock()
         mock_openai_class.return_value = mock_client
@@ -101,10 +102,11 @@ class TestAuditBuySignal:
 
     @patch.dict(os.environ, {
         "OPENAI_API_KEY": "fake-key",
-        "GPT_MODEL_NAME": "gpt-4o",
+        "MODEL_NAME": "gpt-4o",
+        "LLM_PROVIDER": "openai",
         "REVENUE_PERCENTAGE": "10",
     })
-    @patch("llms.OpenAI")
+    @patch("openai.OpenAI")
     def test_incoherent_audit_returns_negative_adjustment(self, mock_openai_class):
         mock_client = MagicMock()
         mock_openai_class.return_value = mock_client
@@ -119,10 +121,11 @@ class TestAuditBuySignal:
 
     @patch.dict(os.environ, {
         "OPENAI_API_KEY": "fake-key",
-        "GPT_MODEL_NAME": "gpt-4o",
+        "MODEL_NAME": "gpt-4o",
+        "LLM_PROVIDER": "openai",
         "REVENUE_PERCENTAGE": "10",
     })
-    @patch("llms.OpenAI")
+    @patch("openai.OpenAI")
     def test_api_failure_returns_conservative_result(self, mock_openai_class):
         """When the LLM API fails, the system should fail conservatively (incoherent, max penalty)."""
         mock_client = MagicMock()
