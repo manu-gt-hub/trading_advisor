@@ -93,6 +93,37 @@ If >= 2 BUYs remain, `filter_correlated_buys(buy_df, max_correlation=0.75)` grou
 - **Buy Recommendations** (Google Drive): symbols that passed all filters + `buy_date`, `stop_loss`, `take_profit`, `risk_reward_ratio`, `tradingview_url`.
 - **Analysis**: all symbols with their evaluation, confidence, labels and `action`.
 
+## Market context (once per run)
+
+`main.build_market_context` downloads, only when something uses them (a candidate
+factor with weight > 0, or shadow mode):
+
+- VIX (`market_data.vix`, default `^VIX`)
+- the market benchmark (`relative_strength.market_benchmark`, default `SPY`)
+- the sector ETFs of the analysed symbols (`relative_strength.sector_etfs`)
+
+All from Yahoo Finance (free). The S&P500 trend (`market_data.index`) is always fetched.
+
+## Shadow mode (`tools/shadow_signals.py`)
+
+With `SHADOW_MODE_ENABLED=true`, after every decision is final, one row per analysed
+symbol is collected and **never used to decide anything**:
+
+| Signal | Source (free) |
+|---|---|
+| `rs_market`, `rs_sector`, `overextension`, `vix` | engine candidate factors |
+| `analyst_score` (−2..+2), `analyst_score_change`, `analyst_count` | Finnhub `/stock/recommendation` |
+| `eps_surprise_pct`, `eps_surprise_avg4`, `eps_beats4` | Finnhub `/stock/earnings` |
+| `news_sentiment_score` (−1..+1), `news_articles` | Alpha Vantage `NEWS_SENTIMENT` (25 calls/day; BUY candidates first) |
+
+Rows are appended to the sheet `SHADOW_LOG_FILE_ID` (if set) and copied into the
+analysis sheet as `shadow_*` columns. A failure only logs a warning. A failed read
+of the log never overwrites it.
+
+Evaluate after a few months with `python evals/run/analyze_shadow.py --from-drive`
+(Spearman IC and quintile spreads vs 5/10/20-day forward returns). A signal that
+looks predictive is promoted through a backtest like any engine change.
+
 ## Block map (everything that can stop a BUY)
 
 | Stage | Blocks BUY if... |

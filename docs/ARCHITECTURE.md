@@ -25,15 +25,15 @@ flowchart LR
         CRON["run_process.yml<br/>cron 17:00 UTC Mon–Fri"] --> MAIN["main.py"]
     end
 
-    FH["Finnhub<br/>quotes · news · earnings"]
-    YF["Yahoo Finance (yfinance)<br/>5Y history · S&P500 · fundamentals · 90d closes"]
-    AV["Alpha Vantage<br/>history fallback"]
-    OAI["OpenAI<br/>BUY audit · news sentiment"]
+    FH["Finnhub<br/>quotes · news · earnings ·<br/>analyst recs (shadow)"]
+    YF["Yahoo Finance (yfinance)<br/>5Y history · S&P500 · VIX · SPY/sector ETFs ·<br/>fundamentals · 90d closes"]
+    AV["Alpha Vantage<br/>history fallback · news sentiment (shadow)"]
+    OAI["LLM provider (OpenAI or Anthropic)<br/>BUY audit · news sentiment"]
     GD[("Google Drive / Sheets<br/>transactions · buy recommendations · analysis")]
 
     MAIN -- "X-Finnhub-Token header" --> FH
     MAIN --> YF
-    MAIN -. "only if Yahoo fails" .-> AV
+    MAIN -. "history fallback · shadow sentiment" .-> AV
     MAIN -. "optional, BUY only" .-> OAI
     MAIN <-->|"service account"| GD
 
@@ -42,10 +42,10 @@ flowchart LR
 
 | External service | Used for | Called from | Failure behaviour |
 |---|---|---|---|
-| Finnhub | Live quote per symbol; company news; earnings calendar | `finnhub_client`, `news_sentiment` | Symbol skipped (quote) or filter skipped (news) |
-| Yahoo Finance | 5-year daily history; S&P500 trend (once per run); P/B valuation; 90-day closes for correlation | `historicals`, `custom_financial_calc`, `risk_management` | Falls back to Alpha Vantage (history) or neutral values |
-| Alpha Vantage | Daily history fallback | `historicals` | Symbol skipped |
-| OpenAI | BUY audit (`LLM_AUDIT_ENABLED`); news sentiment (`NEWS_SENT_ANALYSIS`) | `llms`, `news_sentiment` | Audit fails **conservative** (veto); sentiment → NEUTRAL |
+| Finnhub | Live quote per symbol; company news; earnings calendar; analyst recommendations and EPS surprises (shadow) | `finnhub_client`, `news_sentiment`, `shadow_signals` | Symbol skipped (quote), filter skipped (news), shadow value empty |
+| Yahoo Finance | 5-year daily history; S&P500 trend (once per run); VIX, SPY and sector ETFs (once per run, only when used); P/B valuation; 90-day closes for correlation | `historicals`, `custom_financial_calc`, `risk_management` | Falls back to Alpha Vantage (history) or leaves the optional factor out |
+| Alpha Vantage | Daily history fallback; news sentiment for shadow mode (free key: 25 requests/day) | `historicals`, `shadow_signals` | Symbol skipped / shadow value empty |
+| LLM provider — OpenAI or Anthropic (`LLM_PROVIDER`, `MODEL_NAME`) | BUY audit (`LLM_AUDIT_ENABLED`); news sentiment (`NEWS_SENT_ANALYSIS`) | `llm_client` (via `llms`, `news_sentiment`) | Audit fails **conservative** (veto); sentiment → NEUTRAL |
 | Google Drive | Read/write the three Sheets as CSV | `google_handler` | Transactions update skipped; outputs logged as failed |
 
 Finnhub's free plan covers **US exchanges only**; non-US tickers return zeros
@@ -66,6 +66,8 @@ flowchart TB
         GH["google_handler.py<br/>Sheets I/O · open-position review"]
         NS["news_sentiment.py"]
         LL["llms.py<br/>BUY auditor"]
+        LC["llm_client.py<br/>OpenAI / Anthropic"]
+        SH["shadow_signals.py<br/>logged-only candidate signals"]
     end
 
     subgraph CORE["Decision core (no I/O except optional yfinance)"]
@@ -113,7 +115,7 @@ sequenceDiagram
     participant FH as Finnhub
     participant YF as yfinance
     participant E as Engine (cfc + technical_engine)
-    participant L as OpenAI
+    participant L as LLM provider
     participant D as Google Sheets
 
     GA->>M: python main.py (17:00 UTC)
@@ -289,7 +291,12 @@ flowchart TB
 | Position rules | one per symbol, no buy on the exit day | same |
 | Exits | `update_open_position` on the intraday price | `update_open_position` on the daily close |
 | Weekly confirmation | on | on |
-| **Not replayable** | LLM audit, news/earnings, correlation, valuation, live S&P500 | skipped / neutral (S&P500 fixed at NEUTRAL) |
+| S&P500 trend, VIX, SPY / sector ETFs | fetched live once per run | point-in-time slices of `resources/historicals/market/*.csv` |
+| Regime exit (`exit_regimes`) | regime of the day's analysis | engine evaluated on each holding day |
+| **Not replayable** | LLM audit, news/earnings, correlation, valuation, shadow signals | skipped / neutral |
+
+Data: `python download_historicals.py` refreshes every universe symbol, the index,
+VIX and the ETFs from Yahoo Finance (free, split/dividend adjusted like production).
 
 Running it:
 
@@ -312,8 +319,8 @@ The first output line prints the resolved parameters, so every
 | Layer | Holds | Changed by |
 |---|---|---|
 | `resources/technical_config.json` | Engine weights, regime and decision thresholds, `risk_management` (ATR multipliers, trailing activation, correlation), `news_filter`, `backtest` defaults, LLM bounds | Pull request + backtest comparison |
-| GitHub `vars` | `SYMBOLS_INTEREST_LIST`, `REVENUE_PERCENTAGE`, `MIN_BUY_CONFIDENCE`, `MIN_RISK_REWARD_RATIO`, `LLM_AUDIT_ENABLED`, `NEWS_SENT_ANALYSIS`, `FORCE_OPINION`, `GPT_MODEL_NAME`, `TRANSACTIONS_MAX_RECORDS`, `LOG_LEVEL` | Repository settings |
-| GitHub `secrets` | `FINNHUB_API_KEY`, `OPENAI_API_KEY`, `ALPHA_API_KEY`, `GDRIVE_CREDENTIALS_JSON`, Sheet IDs | Repository settings |
+| GitHub `vars` | `SYMBOLS_INTEREST_LIST`, `REVENUE_PERCENTAGE`, `MIN_BUY_CONFIDENCE`, `MIN_RISK_REWARD_RATIO`, `LLM_AUDIT_ENABLED`, `NEWS_SENT_ANALYSIS`, `FORCE_OPINION`, `LLM_PROVIDER`, `MODEL_NAME`, `TRANSACTIONS_MAX_RECORDS`, `LOG_LEVEL`, **`ENGINE_CONFIG_OVERRIDES`** (any value of the JSON, see `resources/doc/06_configuration.md`), `SHADOW_MODE_ENABLED` | Repository settings |
+| GitHub `secrets` | `FINNHUB_API_KEY`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, `ALPHA_API_KEY`, `GDRIVE_CREDENTIALS_JSON`, Sheet IDs (incl. `SHADOW_LOG_FILE_ID`) | Repository settings |
 | Local `.env` | Same names, for local runs (git-ignored) | Developer |
 
 `MIN_BUY_CONFIDENCE` is deliberately one knob for two things: the engine's BUY
@@ -343,18 +350,46 @@ flowchart LR
   `FINNHUB_API_KEY`, `OPENAI_API_KEY`, `ALPHA_API_KEY` and
   `GDRIVE_CREDENTIALS_JSON` with `***` in every log record. This covers
   Alpha Vantage, whose API only accepts the key as a URL parameter.
+- **Public logs.** This repository is public, so its Actions logs are too. At
+  `LOG_LEVEL=INFO` they list the day's BUYs and every closed position with prices;
+  set the repository variable `LOG_LEVEL=WARNING` to keep that out of public view
+  (warnings and errors, including the start-up config check, still show). The
+  config check prints variable **names** only; Sheet IDs and API keys are masked
+  both by GitHub (secrets) and by `SecretRedactingFilter`.
 - **LLM input.** News headlines are untrusted text sent to the model. The worst
   outcome is a blocked BUY, since the LLM can only veto, so a prompt injection
   cannot create a trade.
 
 ---
 
-## 10. Known limitations
+## 10. Shadow mode
+
+Candidate signals that cannot be backtested (no free point-in-time history) are
+collected live without affecting anything, then judged on realised returns.
+
+```mermaid
+flowchart LR
+    D["Decisions final<br/>(all filters applied)"] --> C["shadow_signals.collect<br/>engine candidates · analysts ·<br/>EPS surprise · news sentiment"]
+    C --> A["analysis sheet<br/>shadow_* columns"]
+    C --> L[("Shadow log sheet<br/>SHADOW_LOG_FILE_ID")]
+    L --> E["evals/run/analyze_shadow.py<br/>IC + quintiles vs 5/10/20d returns"]
+    E -->|"consistent edge"| P["Promote via backtest<br/>+ approval (Rule 1)"]
+    E -->|"no edge"| X(["stays shadow / removed"])
+```
+
+Guarantees: it runs after every decision, works on copies, swallows its own
+errors, never overwrites the log on a failed read, and stays off unless
+`SHADOW_MODE_ENABLED=true`.
+
+---
+
+## 11. Known limitations
 
 - **Intraday bar.** The run happens mid-session, so the last history bar is
   partial: volume is incomplete and the candlestick patterns are unreliable.
-- **Backtest gaps.** The LLM, news, correlation, valuation and live S&P500 are
-  not replayed (section 7).
+- **Backtest gaps.** The LLM, news, correlation, valuation and shadow signals are
+  not replayed (section 7). Shadow signals are validated forward instead
+  (`evals/run/analyze_shadow.py`).
 - **Market calendar.** It knows the regular NYSE holidays, not ad-hoc closures.
   Half days count as normal trading days.
 - **Exit accounting.** Fills are recorded at the stop or target price, which is

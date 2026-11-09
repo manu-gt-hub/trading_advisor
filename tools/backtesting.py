@@ -1,17 +1,32 @@
 import pandas as pd
 import numpy as np
 import logging
-from tools.custom_financial_calc import evaluate_buy_interest, NEUTRAL_VALUATION
-from tools.risk_management import compute_stop_loss_take_profit, update_open_position
+from tools.custom_financial_calc import (
+    evaluate_buy_interest, NEUTRAL_VALUATION, market_trend_from_closes, to_day_index,
+)
+from tools.risk_management import compute_stop_loss_take_profit, update_open_position, get_rules
 
-EXIT_REASONS = ["target", "trailing_stop", "stop_loss", "max_hold", "open_at_end"]
+EXIT_REASONS = ["target", "trailing_stop", "stop_loss", "regime_exit", "max_hold", "open_at_end"]
+
+
+def _market_view(market_data, day):
+    """Point-in-time market inputs for one day: (sp500 tuple | None, market_context dict).
+    Only data dated <= day is used (no look-ahead)."""
+    if not market_data:
+        return None, None
+    index = market_data.get("index")
+    sp500 = market_trend_from_closes(index.loc[:day]) if index is not None else None
+    vix = market_data.get("vix")
+    vix_level = vix.loc[:day].iloc[-1] if vix is not None and len(vix.loc[:day]) else None
+    benchmarks = {k: market_data[k].loc[:day] for k in ("market", "sector") if market_data.get(k) is not None}
+    return sp500, {"vix": vix_level, "benchmarks": benchmarks}
 
 logger = logging.getLogger(__name__)
 
 
 def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
                  min_history=250, step_days=1, sp500_mock=("NEUTRAL", 0.0),
-                 min_buy_confidence=None, min_risk_reward_ratio=None):
+                 min_buy_confidence=None, min_risk_reward_ratio=None, market_data=None):
     """
     Backtest the technical analysis signals over historical data, replaying the
     production pipeline day by day:
@@ -25,7 +40,11 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
          function production runs) -> trailing stop, stop-loss, take-profit
 
     Not replayable offline (documented gaps): LLM audit, news/earnings filter,
-    cross-symbol correlation filter, valuation adjustment, real S&P500 context.
+    cross-symbol correlation filter, valuation adjustment.
+
+    market_data (optional): {"index", "vix", "market", "sector"} -> pd.Series of closes
+    indexed by to_day_index(). When given, each day sees the real point-in-time S&P500
+    trend, VIX and relative-strength benchmarks instead of sp500_mock.
 
     Parameters:
         df (pd.DataFrame): Full historical data with columns: date, open, high, low, close, volume.
@@ -50,6 +69,15 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
     df["high"] = pd.to_numeric(df.get("high", df["close"]), errors="coerce")
     df["low"] = pd.to_numeric(df.get("low", df["close"]), errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
+    days = to_day_index(df["date"])
+    exit_regimes = get_rules().get("exit_regimes") or []
+
+    def evaluate(idx, price):
+        sp500, context = _market_view(market_data, days[idx])
+        return evaluate_buy_interest(symbol, df.iloc[:idx + 1].copy(), price,
+                                     sp500_override=sp500 if market_data else sp500_mock,
+                                     valuation_override=NEUTRAL_VALUATION,
+                                     market_context=context)
 
     trades = []
     total_signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "EVALUATION_FAILED": 0}
@@ -64,14 +92,11 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
             continue
 
         # Use only data up to day i (look-ahead bias prevention)
-        hist_slice = df.iloc[:i + 1].copy()
         entry_price = float(df.iloc[i]["close"])
         entry_date = df.iloc[i]["date"]
 
         try:
-            result = evaluate_buy_interest(symbol, hist_slice, entry_price,
-                                           sp500_override=sp500_mock,
-                                           valuation_override=NEUTRAL_VALUATION)
+            result = evaluate(i, entry_price)
         except Exception as e:
             logger.warning(f"Backtest eval failed at index {i}: {e}")
             continue
@@ -125,7 +150,10 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
                 min_price_seen = close
                 day_of_mae = j
 
-            pos = update_open_position(entry_price, stop_loss, highest_price, close, target_price)
+            # Production checks the regime of every analysed symbol daily; only pay for
+            # that evaluation when regime exits are enabled
+            regime = evaluate(i + j, close)["regime"] if exit_regimes else None
+            pos = update_open_position(entry_price, stop_loss, highest_price, close, target_price, regime)
             highest_price, stop_loss = pos["highest_price"], pos["stop_loss"]
             if pos["exit_reason"] is None:
                 continue
@@ -136,6 +164,8 @@ def run_backtest(df, symbol, target_profit_pct=10.0, max_holding_days=None,
                 exit_reason = "target"
                 hit_target = True
                 days_to_target = j
+            elif pos["exit_reason"] == "regime_exit":
+                exit_reason = "regime_exit"
             elif initial_stop is not None and stop_loss > initial_stop:
                 exit_reason = "trailing_stop"
                 gain_at_trailing_trigger = round(((close - entry_price) / entry_price) * 100, 2)

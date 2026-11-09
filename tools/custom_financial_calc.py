@@ -234,51 +234,62 @@ def _compute_weekly_confirmation(df):
         return None
 
 
+def to_day_index(dates) -> pd.DatetimeIndex:
+    """Calendar-day index shared by symbol, index and benchmark series (UTC date, tz-naive)."""
+    return pd.DatetimeIndex(pd.to_datetime(dates, utc=True)).tz_convert(None).normalize()
+
+
+def market_trend_from_closes(closes):
+    """
+    Market trend from an index close series (oldest -> newest): price vs MA50 (±1),
+    price vs MA20 (±0.5), MA20 vs MA50 (±0.5). Returns (trend, score) or (None, 0.0)
+    when there are fewer than 50 closes.
+    """
+    closes = pd.Series(closes).dropna()
+    if len(closes) < 50:
+        return None, 0.0
+    price = closes.iloc[-1]
+    ma50 = closes.iloc[-50:].mean()
+    ma20 = closes.iloc[-20:].mean()
+
+    score = (1.0 if price > ma50 else -1.0) + (0.5 if price > ma20 else -0.5) + (0.5 if ma20 > ma50 else -0.5)
+    if score >= 1.0:
+        trend = "BULLISH"
+    elif score <= -1.0:
+        trend = "BEARISH"
+    else:
+        trend = "NEUTRAL"
+    return trend, score
+
+
 def _get_sp500_trend():
-    """Fetch S&P500 recent data and determine market trend."""
+    """Fetch the market index (config market_data.index, default ^GSPC) and determine its trend."""
     try:
-        spy = yf.Ticker("^GSPC")
-        data = spy.history(period="6mo")
-        if data is None or data.empty or len(data) < 50:
+        ticker = technical_engine.load_config().get("market_data", {}).get("index", "^GSPC")
+        data = yf.Ticker(ticker).history(period="6mo")
+        if data is None or data.empty:
             return None, 0.0
-
-        data["ma50"] = data["Close"].rolling(50).mean()
-        data["ma20"] = data["Close"].rolling(20).mean()
-        latest = data.iloc[-1]
-
-        price = latest["Close"]
-        ma50 = latest["ma50"]
-        ma20 = latest["ma20"]
-
-        if pd.isna(ma50) or pd.isna(ma20):
-            return None, 0.0
-
-        # Score: positive = bullish market, negative = bearish
-        score = 0.0
-        if price > ma50:
-            score += 1.0
-        else:
-            score -= 1.0
-        if price > ma20:
-            score += 0.5
-        else:
-            score -= 0.5
-        if ma20 > ma50:
-            score += 0.5
-        else:
-            score -= 0.5
-
-        if score >= 1.0:
-            trend = "BULLISH"
-        elif score <= -1.0:
-            trend = "BEARISH"
-        else:
-            trend = "NEUTRAL"
-
-        return trend, score
+        return market_trend_from_closes(data["Close"])
     except Exception as e:
         logger.warning(f"Could not fetch S&P500 data: {e}")
         return None, 0.0
+
+
+def _excess_return(day_index, closes, benchmark, lookback):
+    """
+    Symbol return divided by benchmark return over the same calendar window, minus 1
+    (e.g. +0.05 = outperformed by 5%). None when either series is too short.
+    benchmark: pd.Series of closes indexed by to_day_index dates.
+    """
+    if benchmark is None or len(benchmark) == 0 or len(closes) <= lookback:
+        return None
+    end, start = day_index[-1], day_index[-1 - lookback]
+    bench = benchmark.sort_index()
+    b_end, b_start = bench.asof(end), bench.asof(start)
+    c_end, c_start = closes.iloc[-1], closes.iloc[-1 - lookback]
+    if any(pd.isna(x) or x <= 0 for x in (b_end, b_start, c_start, c_end)):
+        return None
+    return float((c_end / c_start) / (b_end / b_start) - 1)
 
 
 def _get_valuation_metrics(symbol: str, current_price: float) -> dict:
@@ -361,7 +372,7 @@ NEUTRAL_VALUATION = {
 
 
 def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, sp500_override=None,
-                          valuation_override=None) -> dict:
+                          valuation_override=None, market_context=None) -> dict:
     """
     Evaluates BUY, HOLD, or SELL interest for a stock based on technical indicators,
     historical volatility, monthly returns, breakouts, and momentum.
@@ -370,6 +381,11 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, s
     sp500_override / valuation_override skip the network fetches (used to share one
     S&P500 fetch across symbols, and by the backtester, which has no point-in-time
     fundamentals).
+
+    market_context (optional, fetched once per run / read from CSVs in the backtest):
+      {"vix": float, "benchmarks": {"market": pd.Series, "sector": pd.Series}}
+    Benchmark series hold closes indexed by to_day_index(). Missing pieces simply
+    leave the corresponding optional factors out.
     """
 
     logger.info(f"Evaluating buy interest for: {symbol}")
@@ -488,6 +504,18 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, s
         # -------------------------
         # NEW: S&P500 market context
         # -------------------------
+        # Relative strength vs market / sector benchmark and market fear gauge
+        market_context = market_context or {}
+        engine_cfg = technical_engine.load_config()
+        mom_cfg = engine_cfg["layers"]["momentum"]["indicators"]
+        day_index = to_day_index(df["date"])
+        benchmarks = market_context.get("benchmarks") or {}
+        rs_excess = {}
+        for name, key in (("rs_market", "market"), ("rs_sector", "sector")):
+            lookback = mom_cfg.get(name, {}).get("params", {}).get("lookback", 63)
+            rs_excess[name] = _excess_return(day_index, df["close"], benchmarks.get(key), lookback)
+        vix_level = market_context.get("vix")
+
         if sp500_override is not None:
             market_trend, market_score = sp500_override
         else:
@@ -605,12 +633,20 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, s
             "fib_618": fib_levels["fib_618"],
             # risk layer
             "volatility": _f(latest["volatility_20"]),
+            "atr": _f(latest["atr_14"]),
             "bb_upper": _f(latest["bb_upper"]),
             "bearish_divergence": bool(bearish_divergence),
         }
         # S&P500 market context (risk layer, only when data available)
         if market_trend is not None:
             features["market_score"] = market_score
+        if vix_level is not None and pd.notna(vix_level):
+            features["vix"] = float(vix_level)
+            signals_dict["VIX"] = round(float(vix_level), 2)
+        for name, excess in rs_excess.items():
+            if excess is not None:
+                features[f"{name}_excess"] = excess
+                signals_dict[f"{name.upper()}_Excess"] = round(excess, 4)
         if has_volume:
             features["volume"] = _f(latest.get("volume"))
             features["vol_sma_20"] = _f(latest.get("vol_sma_20"))

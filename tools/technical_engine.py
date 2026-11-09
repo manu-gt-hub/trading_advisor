@@ -18,6 +18,7 @@ in classification; it only audits BUY signals downstream.
 """
 
 import os
+import copy
 import json
 import math
 import logging
@@ -49,12 +50,68 @@ def resolve_buy_threshold(config: dict = None) -> float:
 
 
 def load_config(force_reload: bool = False) -> dict:
-    """Load (and cache) the technical configuration JSON."""
+    """Load (and cache) the technical configuration JSON, with ENGINE_CONFIG_OVERRIDES applied."""
     global _CONFIG_CACHE
     if _CONFIG_CACHE is None or force_reload:
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            _CONFIG_CACHE = json.load(f)
+            _CONFIG_CACHE = apply_overrides(json.load(f), os.environ.get("ENGINE_CONFIG_OVERRIDES"))
     return _CONFIG_CACHE
+
+
+# Maps whose keys are data (symbols), so overrides may add new entries
+_OPEN_MAPS = {"relative_strength.sector_etfs"}
+
+
+def _kind(value):
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    return type(value).__name__
+
+
+def apply_overrides(config: dict, raw) -> dict:
+    """
+    Apply ENGINE_CONFIG_OVERRIDES: a JSON object of dotted config paths -> values, e.g.
+      {"layers.momentum.indicators.rs_market.weight": 0.15,
+       "risk_management.exit_regimes": ["TRENDING_DOWN"]}
+    Lets every tunable be changed from a GitHub repository variable without a commit.
+    Unknown paths and type changes are rejected (logged, never fatal) so a typo can
+    neither crash the daily run nor silently do nothing.
+    """
+    if not raw or not str(raw).strip():
+        return config
+    try:
+        overrides = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ ENGINE_CONFIG_OVERRIDES is not valid JSON ({e}); ignored")
+        return config
+    if not isinstance(overrides, dict):
+        logger.error("❌ ENGINE_CONFIG_OVERRIDES must be a JSON object; ignored")
+        return config
+
+    config = copy.deepcopy(config)
+    for path, value in overrides.items():
+        keys = path.split(".")
+        parent = config
+        for k in keys[:-1]:
+            parent = parent.get(k) if isinstance(parent, dict) else None
+        leaf = keys[-1]
+        if not isinstance(parent, dict):
+            logger.error(f"❌ Config override '{path}': unknown path; ignored")
+            continue
+        if leaf not in parent and ".".join(keys[:-1]) not in _OPEN_MAPS:
+            logger.error(f"❌ Config override '{path}': unknown key; ignored")
+            continue
+        old = parent.get(leaf)
+        if leaf in parent and "null" not in (_kind(old), _kind(value)) and _kind(old) != _kind(value):
+            logger.error(f"❌ Config override '{path}': expected {_kind(old)}, got {_kind(value)}; ignored")
+            continue
+        parent[leaf] = value
+        logger.info(f"⚙️ Config override {path} = {value!r} (was {old!r})")
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +320,14 @@ def compute_momentum_score(features: dict, config: dict = None):
             # Mild pullback zone → mildly bullish
             factors["fib_support"] = 0.3
 
+    # Relative strength vs market / sector ETF (optional, only when benchmark data exists).
+    # Inputs are excess returns over the lookback window computed by custom_financial_calc.
+    for name in ("rs_market", "rs_sector"):
+        excess = features.get(f"{name}_excess")
+        if excess is not None and not (isinstance(excess, float) and math.isnan(excess)):
+            rs_scale = ind.get(name, {}).get("params", {}).get("scale", 5.0)
+            factors[name] = _clip(_tanh(_safe(excess) * rs_scale), -1.0, 1.0)
+
     score = _weighted_average(factors, ind)
     return _clip(score, -1.0, 1.0), factors
 
@@ -326,6 +391,23 @@ def compute_risk_score(features: dict, config: dict = None):
         # market_score ranges from -2 (very bearish) to +2 (very bullish)
         # Convert to risk: bearish = high risk (1.0), bullish = low risk (0.0)
         factors["market_context"] = _clip((1.0 - _safe(market_score_val)) / 2.0, 0.0, 1.0)
+
+    # Overextension: distance above EMA20 in ATR units. Stretched prices tend to
+    # mean-revert, so this is a risk, not a trend confirmation.
+    atr = _safe(features.get("atr"))
+    ema20 = _safe(features.get("ema20"))
+    if "overextension" in ind and atr > 0 and ema20 > 0 and price > 0:
+        p = ind["overextension"].get("params", {})
+        start, full = p.get("start_atr", 1.5), p.get("full_atr", 4.0)
+        ext = (price - ema20) / atr
+        factors["overextension"] = _clip((ext - start) / (full - start), 0.0, 1.0) if full > start else 0.0
+
+    # Market fear gauge (optional, only when VIX data available)
+    vix = features.get("vix")
+    if "vix" in ind and vix is not None and _safe(vix) > 0:
+        p = ind["vix"].get("params", {})
+        low, high = p.get("low", 15.0), p.get("high", 35.0)
+        factors["vix"] = _clip((_safe(vix) - low) / (high - low), 0.0, 1.0) if high > low else 0.0
 
     score = _weighted_average(factors, ind)
     return _clip(score, 0.0, 1.0), factors

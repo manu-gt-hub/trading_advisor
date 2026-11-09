@@ -10,15 +10,7 @@ from tools.backtesting import run_backtest, format_backtest_report
 HISTORICALS_DIR = os.path.join(os.path.dirname(__file__), '..', 'resources', 'historicals')
 
 # Map symbol -> csv filename for all available historical data
-SYMBOL_CSV_MAP = {
-    "MSFT": "msft_hist_data.csv",
-    "AAPL": "apple_hist_data.csv",
-    "NVDA": "nvidia_hist_data.csv",
-    "META": "meta_hist_data.csv",
-    "KO": "ko_hist_data.csv",
-    "V": "visa_hist_data.csv",
-    "AMZN": "amzn_hist_data.csv",
-}
+SYMBOL_CSV_MAP = {s: f"{s}.csv" for s in ("MSFT", "AAPL", "NVDA", "META", "KO", "V", "AMZN")}
 
 
 def load_symbol_data(symbol):
