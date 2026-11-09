@@ -17,14 +17,17 @@ BUY signals.
 | `tools/risk_management.py` | ATR stop/target, R:R, sizing, correlation filter | YES |
 | `tools/backtesting.py` | Historical signal simulation, MAE/MFE tracking | YES (the evaluator) |
 | `tools/finnhub_client.py` | Finnhub quotes — US exchanges only on free plan | no |
-| `tools/news_sentiment.py` | Earnings/news filter (Finnhub + GPT) | YES (pipeline filter) |
-| `tools/llms.py` | GPT auditor (`audit_buy_signal`) + legacy helpers | partially (bounded adjustment) |
+| `tools/news_sentiment.py` | Earnings/news filter (Finnhub + LLM) | YES (pipeline filter) |
+| `tools/llms.py` | LLM auditor (`audit_buy_signal`) | partially (bounded adjustment) |
+| `tools/llm_client.py` | Provider-neutral LLM call (`LLM_PROVIDER`: openai / anthropic) | no |
+| `tools/shadow_signals.py` | Shadow mode: logged-only candidate signals | **must not** |
 | `tools/google_handler.py` | Google Drive I/O, open positions, production trailing stop | YES (trailing logic) |
-| `tools/historicals.py` | Alpha Vantage historical fetch | no |
-| `tools/general.py` | Decision extraction, `action` column | partially |
+| `tools/historicals.py` | Yahoo history (Alpha Vantage fallback), live benchmark closes | no |
+| `tools/general.py` | `action` column, NYSE calendar, TLS + log redaction | partially |
 | `resources/technical_config.json` | All numeric params, weights, regime rules | YES |
 | `resources/symbols_markets.json` | symbol→exchange for TradingView URLs | no |
-| `run_backtest_all.py` | Backtest entry point over `resources/historicals/*.csv` | validation |
+| `run_backtest_all.py` | Backtest entry point over `backtest.universe` (22 symbols) | validation |
+| `download_historicals.py` | Refreshes `resources/historicals/` from Yahoo Finance (free) | data |
 | `docs/BACKTEST_LOG.md` | Engine quality baseline, dated entries | governance |
 
 ## Daily pipeline (production)

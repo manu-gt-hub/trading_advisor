@@ -34,7 +34,8 @@ python main.py --test   # debug output
 - The repo is Windows-hosted; the agent shell may be bash (Git Bash). Prefer
   forward-compatible paths and `python` over `py`.
 - Tests are fully mocked — no API keys needed for pytest.
-- `run_backtest_all.py` uses `resources/historicals/*.csv`. Parameters come from
+- `run_backtest_all.py` runs every symbol in `backtest.universe` (22, read from
+  `resources/historicals/<SYMBOL>.csv`, ~10 min with 4 cores). Parameters come from
   the `backtest` section of `technical_config.json`, overridden by the same env
   vars production reads (`REVENUE_PERCENTAGE`, `MIN_BUY_CONFIDENCE`,
   `MIN_RISK_REWARD_RATIO`); the resolved values are printed on the first line.

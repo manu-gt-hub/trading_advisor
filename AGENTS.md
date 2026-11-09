@@ -203,9 +203,13 @@ Backtest (`run_backtest_all.py`) works fully offline from `resources/historicals
 
 - **Finnhub free plan = US exchanges only.** Symbols like `BA.L`, `ABB` (wrong
   ticker), `.DE`, `.PA` will 403/return zeros. The system skips them safely.
-- **AAPL/V are weak under the current config** (low volatility vs 10% target in
-  30-day hold). Per-symbol results differ a lot — always check the per-symbol
-  table, not just the consolidated row.
+- **Low-volatility / defensive names are weak under the current config**: a fixed
+  10% target is rarely reached (MCD, PG, HD, UNH, LIN lose; AAPL, KO, V are thin).
+  Per-symbol results differ a lot — always check the per-symbol table, not just
+  the consolidated row.
+- **The backtest universe is fixed by criteria, not by results** (22 symbols,
+  `backtest.universe`). Never drop or add symbols because of how the system did
+  on them; any change to the universe or the data changes the baseline.
 - **Backtest ≠ production in a few known places**: no LLM audit, news filter,
   correlation filter, valuation adjustment or shadow signals. S&P500 trend, VIX
   and relative-strength benchmarks are replayed point-in-time from

@@ -45,7 +45,8 @@ deployments without it don't break.
   entries used `step_days=5` + a 30-day max hold + a 2.5×ATR trailing stop
   and no initial stop — those numbers are not comparable with the current ones.
 - Confidence band 0.6–0.7 underperforms 0.5–0.6 — calibration issue, not fixed.
-- AAPL/V underperform: low volatility can't reach 10% target in 30 days.
+- Low-volatility / defensive names underperform (MCD, PG, HD, UNH, LIN lose;
+  AAPL, KO, V thin): a fixed 10% target is rarely reached.
   Target-sweep analysis: 8% maximizes global PF (3.40) and avg return (+3.66%).
 
 ## LLM boundary
