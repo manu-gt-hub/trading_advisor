@@ -87,6 +87,15 @@ For a clearly bullish case in `TRENDING_UP`:
 - `risk_adjusted = 0.77 * (1 - 0.5*0.06) = 0.747`.
 - `0.747 >= 0.6` and `0.06 <= 0.6` and regime `TRENDING_UP` -> **BUY**, `confidence ~ 0.75`, `strength = STRONG`.
 
+## Regime exit (optional)
+
+`risk_management.exit_regimes` (default `[]`, disabled) closes an open position at
+the current price when the symbol's regime for the day is in the list, e.g.
+`["TRENDING_DOWN"]`. It is checked after stop-loss and take-profit, inside the shared
+`update_open_position`, so the backtest replays it exactly. Only symbols analysed in
+the run have a regime; positions in symbols removed from `SYMBOLS_INTEREST_LIST`
+keep exiting by stop / target only. Exit reason: `regime_exit`.
+
 ## What happens after the signal
 
 - If the signal is **BUY** -> it goes through the **LLM audit** ([`04_llm_audit.md`](04_llm_audit.md)) and the **portfolio filters** ([`05_pipeline_and_filters.md`](05_pipeline_and_filters.md)).

@@ -50,7 +50,7 @@ def compute_stop_loss_take_profit(current_price, atr_14, revenue_percentage=None
     }
 
 
-def update_open_position(buy_value, stop_loss, highest_price, current_price, target_price):
+def update_open_position(buy_value, stop_loss, highest_price, current_price, target_price, regime=None):
     """
     Advance an open position by one price observation. Single source of truth for
     exits: production (google_handler.update_transactions) and the backtester both
@@ -59,11 +59,16 @@ def update_open_position(buy_value, stop_loss, highest_price, current_price, tar
     Trailing stop: once the highest price seen is >= trailing_activation_pct above
     buy_value, the stop ratchets to highest_price - (buy_value - stop_loss).
 
+    Regime exit: when risk_management.exit_regimes is non-empty and today's regime
+    for the symbol is in it, the position closes at the current price (checked after
+    stop-loss / take-profit). regime=None (symbol not analysed today) never exits.
+
     Returns dict with the values to persist (highest_price, stop_loss, rounded to
     cents as stored in the sheet), trailed_from (previous stop when it moved, else
-    None), exit_reason ('stop_loss' | 'take_profit' | None) and exit_price.
+    None), exit_reason ('stop_loss' | 'take_profit' | 'regime_exit' | None) and exit_price.
     """
-    activation = get_rules().get("trailing_activation_pct", 2.0)
+    rules = get_rules()
+    activation = rules.get("trailing_activation_pct", 2.0)
     stop_loss = pd.to_numeric(stop_loss, errors="coerce")
     highest_price = pd.to_numeric(highest_price, errors="coerce")
     new_highest = pd.isna(highest_price) or current_price > highest_price
@@ -85,6 +90,8 @@ def update_open_position(buy_value, stop_loss, highest_price, current_price, tar
         exit_reason, exit_price = "stop_loss", float(stop_loss)
     elif current_price >= target_price:
         exit_reason, exit_price = "take_profit", float(target_price)
+    elif regime is not None and regime in (rules.get("exit_regimes") or []):
+        exit_reason, exit_price = "regime_exit", float(current_price)
 
     return {
         "highest_price": round(float(highest_price), 2),

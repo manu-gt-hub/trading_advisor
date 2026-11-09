@@ -11,8 +11,16 @@ python -m pytest test/ -q
 python -m pytest test/test_backtesting.py -q
 python -m pytest test/test_backtesting.py::test_name -q
 
+# Refresh backtest data from Yahoo Finance (free; --windows-certs behind TLS interception)
+python download_historicals.py
+
 # Engine validation backtest (fully offline, replays the production pipeline)
 python run_backtest_all.py
+# Test a parameter change exactly as production would run it
+python run_backtest_all.py --overrides '{"layers.momentum.indicators.rs_sector.weight": 0.15}'
+
+# Judge shadow signals once a few months of log exist
+python evals/run/analyze_shadow.py --from-drive
 # Experiments only: --min-conf, --min-rr, --target, --step-days, --max-hold, --no-weekly
 python run_backtest_all.py --max-hold 30
 

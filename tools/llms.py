@@ -1,18 +1,13 @@
 import re
-import httpx
-from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import logging
-from tools.general import ssl_verify as _ssl_verify
+from tools import llm_client
 
 logger = logging.getLogger(__name__)
 
 if not os.getenv("GITHUB_ACTIONS"):  # This var is auto-set in GitHub Actions
     load_dotenv()
-
-# Timeout for LLM HTTP calls (seconds): connect, read
-_LLM_TIMEOUT = (30, 120)
 
 # ---------------------------------------------------------------------------
 # LLM AS AUDITOR (NOT a decision system)
@@ -98,24 +93,13 @@ def audit_buy_signal(signals, symbol, current_price, technical_result):
     bounds = technical_engine.load_config().get("llm_audit", {}).get(
         "confidence_adjustment_bounds", [-0.3, 0.1]
     )
-    check_llm_env()
-    model_name = os.getenv("GPT_MODEL_NAME", "gpt-4o")
     metrics = "\n".join([f"{k} = {v} " for k, v in signals.items()])
     prompt = generate_audit_prompt(metrics, current_price, technical_result, bounds)
 
     try:
-        with httpx.Client(verify=_ssl_verify(), timeout=_LLM_TIMEOUT) as http_client:
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), http_client=http_client)
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": audit_system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-            )
-        raw = response.choices[0].message.content
-        logger.info(f"LLM audit for {symbol}: {raw}")
+        check_llm_env()
+        raw = llm_client.complete(audit_system_prompt, prompt)
+        logger.info(f"LLM audit for {symbol} ({llm_client.provider()}/{llm_client.model_name()}): {raw}")
         return parse_audit_response(raw, bounds)
     except Exception as e:
         logger.error(f"LLM audit failed for {symbol}: {e}")
@@ -125,15 +109,14 @@ def audit_buy_signal(signals, symbol, current_price, technical_result):
 
 def check_llm_env():
     """
-    Ensure the necessary environment variables are set for the LLM API key, model name, and revenue percentage.
+    Ensure the API key of the selected LLM_PROVIDER and REVENUE_PERCENTAGE are set.
+    MODEL_NAME is optional (llm.default_models in technical_config.json).
     """
     missing_env_vars = []
-    
-    if not os.getenv("OPENAI_API_KEY"):
-        missing_env_vars.append("OPENAI_API_KEY")
 
-    if not os.getenv('GPT_MODEL_NAME'):
-        missing_env_vars.append("GPT_MODEL_NAME")
+    key = llm_client.api_key_env()
+    if not os.getenv(key):
+        missing_env_vars.append(key)
 
     if not os.getenv('REVENUE_PERCENTAGE'):
         missing_env_vars.append("REVENUE_PERCENTAGE")

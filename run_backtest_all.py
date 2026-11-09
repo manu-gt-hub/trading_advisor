@@ -1,10 +1,12 @@
 """
-Run backtesting across all historical data CSVs in resources/historicals/.
-Handles both Yahoo Finance and NASDAQ CSV formats.
+Run the production-aligned backtest over every symbol in backtest.universe
+(resources/historicals/<SYMBOL>.csv, refreshed with download_historicals.py).
 
 Defaults replay the production pipeline: parameters come from the "backtest"
 section of resources/technical_config.json, overridden by the same env vars
-production reads (REVENUE_PERCENTAGE, MIN_BUY_CONFIDENCE, MIN_RISK_REWARD_RATIO).
+production reads (REVENUE_PERCENTAGE, MIN_BUY_CONFIDENCE, MIN_RISK_REWARD_RATIO,
+ENGINE_CONFIG_OVERRIDES). Each day sees the real point-in-time S&P500 trend, VIX
+and relative-strength benchmarks from resources/historicals/market/.
 CLI flags exist only for experiments.
 """
 import argparse
@@ -18,21 +20,39 @@ from unittest.mock import patch
 
 from tools import technical_engine
 from tools.backtesting import run_backtest, format_backtest_report, summarize_trades, split_trades, EXIT_REASONS
+from tools.custom_financial_calc import to_day_index
 
 logging.basicConfig(level=logging.WARNING)
 
 HIST_DIR = os.path.join(os.path.dirname(__file__), "resources", "historicals")
+MARKET_DIR = os.path.join(HIST_DIR, "market")
 
-# Map CSV filenames to stock symbols
-FILE_SYMBOL_MAP = {
-    "msft_hist_data.csv": "MSFT",
-    "apple_hist_data.csv": "AAPL",
-    "nvidia_hist_data.csv": "NVDA",
-    "ko_hist_data.csv": "KO",
-    "meta_hist_data.csv": "META",
-    "visa_hist_data.csv": "V",
-    "amzn_hist_data.csv": "AMZN",
-}
+
+def universe():
+    """Symbols to backtest (config backtest.universe), each read from <SYMBOL>.csv."""
+    return list(technical_engine.load_config().get("backtest", {}).get("universe", []))
+
+
+def _close_series(name):
+    """Closes from resources/historicals/market/<name>.csv indexed by day, or None."""
+    path = os.path.join(MARKET_DIR, f"{name.lstrip('^')}.csv")
+    if not os.path.exists(path):
+        return None
+    df = load_and_normalize_csv(path)
+    return pd.Series(df["close"].astype(float).values, index=to_day_index(df["date"])).sort_index()
+
+
+def load_market_data(symbol):
+    """Point-in-time market inputs for one symbol (sliced per day by the backtester)."""
+    cfg = technical_engine.load_config()
+    md, rs = cfg.get("market_data", {}), cfg.get("relative_strength", {})
+    sector_etf = rs.get("sector_etfs", {}).get(symbol)
+    return {
+        "index": _close_series(md.get("index", "^GSPC")),
+        "vix": _close_series(md.get("vix", "^VIX")),
+        "market": _close_series(rs.get("market_benchmark", "SPY")),
+        "sector": _close_series(sector_etf) if sector_etf else None,
+    }
 
 
 def load_and_normalize_csv(filepath):
@@ -94,16 +114,16 @@ def resolve_params(args=None):
     return params
 
 
-def _backtest_symbol(filename, symbol, params, weekly):
+def _backtest_symbol(symbol, params, weekly, market):
     """Worker: one symbol per process (symbols are independent, results identical to serial)."""
     logging.basicConfig(level=logging.WARNING)
     os.environ["MIN_BUY_CONFIDENCE"] = str(params["min_buy_confidence"])
-    df = load_and_normalize_csv(os.path.join(HIST_DIR, filename))
+    df = load_and_normalize_csv(os.path.join(HIST_DIR, f"{symbol}.csv"))
     header = f"\n🔄 Backtest for {symbol}: {len(df)} rows ({df['date'].min().date()} to {df['date'].max().date()})"
     weekly_ctx = nullcontext() if weekly else patch(
         "tools.custom_financial_calc._compute_weekly_confirmation", return_value=None)
     with weekly_ctx:
-        results = run_backtest(df, symbol, **params)
+        results = run_backtest(df, symbol, market_data=load_market_data(symbol) if market else None, **params)
     return header, results
 
 
@@ -111,21 +131,22 @@ def resolve_oos_start(cli_value=None):
     return cli_value or technical_engine.load_config().get("backtest", {}).get("oos_start")
 
 
-def run_all_backtests(params=None, weekly=True, workers=None, oos_start=None):
-    """Run backtests on all CSV files (in parallel) and print a summary."""
+def run_all_backtests(params=None, weekly=True, workers=None, oos_start=None, market=True, symbols=None):
+    """Run backtests on all universe symbols (in parallel) and print a summary."""
     params = params or resolve_params()
     oos_start = oos_start or resolve_oos_start()
     print("Parameters: " + ", ".join(f"{k}={v}" for k, v in params.items())
-          + f", weekly={weekly}, oos_start={oos_start}")
+          + f", weekly={weekly}, market_data={market}, oos_start={oos_start}"
+          + f", overrides={os.environ.get('ENGINE_CONFIG_OVERRIDES') or '{}'}")
     jobs = []
-    for filename, symbol in FILE_SYMBOL_MAP.items():
-        if not os.path.exists(os.path.join(HIST_DIR, filename)):
-            print(f"⚠️  Skipping {symbol}: {filename} not found")
+    for symbol in symbols or universe():
+        if not os.path.exists(os.path.join(HIST_DIR, f"{symbol}.csv")):
+            print(f"⚠️  Skipping {symbol}: {symbol}.csv not found (run download_historicals.py)")
             continue
-        jobs.append((filename, symbol))
+        jobs.append(symbol)
 
     with ProcessPoolExecutor(max_workers=workers or min(len(jobs), os.cpu_count() or 1)) as pool:
-        futures = [pool.submit(_backtest_symbol, f, s, params, weekly) for f, s in jobs]
+        futures = [pool.submit(_backtest_symbol, s, params, weekly, market) for s in jobs]
         outputs = [f.result() for f in futures]
 
     all_results = []
@@ -303,5 +324,13 @@ if __name__ == "__main__":
     ap.add_argument("--max-hold", type=int, help="experimental time exit in trading days (production: none)")
     ap.add_argument("--no-weekly", action="store_true", help="disable weekly confirmation (legacy behaviour)")
     ap.add_argument("--oos-start", help="out-of-sample start date YYYY-MM-DD (default: config backtest.oos_start)")
+    ap.add_argument("--market-neutral", action="store_true",
+                    help="legacy: fixed NEUTRAL S&P500, no VIX / relative-strength data")
+    ap.add_argument("--overrides", help="JSON like ENGINE_CONFIG_OVERRIDES, e.g. '{\"risk_management.exit_regimes\": [\"TRENDING_DOWN\"]}'")
+    ap.add_argument("--symbols", nargs="*", help="subset of the universe")
     cli = ap.parse_args()
-    run_all_backtests(resolve_params(cli), weekly=not cli.no_weekly, oos_start=resolve_oos_start(cli.oos_start))
+    if cli.overrides is not None:
+        os.environ["ENGINE_CONFIG_OVERRIDES"] = cli.overrides  # inherited by the worker processes
+        technical_engine.load_config(force_reload=True)
+    run_all_backtests(resolve_params(cli), weekly=not cli.no_weekly, oos_start=resolve_oos_start(cli.oos_start),
+                      market=not cli.market_neutral, symbols=cli.symbols)
