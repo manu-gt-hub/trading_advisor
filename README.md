@@ -46,11 +46,13 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 - Simulates signals over historical data **without look-ahead bias**
 - Measures win rate, average return, max drawdown per trade
 - Replays the production pipeline: daily evaluation, ATR stop-loss, trailing stop, R:R and confidence filters, same exit rules
-- Current baseline (2026-10-31, 10% target, 7 symbols):
-  - **93 trades**, 22.6% hit the target, **+2.08% avg return per trade**, profit factor **2.88**
-  - **Out-of-sample** (entries since 2025-01-01): 21 trades, +1.64% avg return, profit factor 2.16
-  - **NVDA**: 20 trades, +3.58% avg return
-  - Below buy-and-hold on every symbol: the regime gate keeps the system out of the market most of the time
+- Current results (2026-11-09, 10% target, **22 symbols** across 11 sectors plus the index, incl. a long decliner (INTC), high volatility (TSLA), defensives (MCD, PG) and the index (SPY); data 2021-11 → 2026-11, real point-in-time S&P500 context):
+  - **350 trades**, 15.7% hit the target, **+1.45% avg return per trade**, profit factor **2.23**
+  - **In-sample** (entries before 2025-01-01): 191 trades, +1.55%, PF 2.32 · **Out-of-sample**: 159 trades, +1.33%, PF 2.12
+  - Best: NEE +3.35%, GOOGL +3.46%, NVDA +3.20%, JNJ +3.10% · SPY itself +1.46% (PF 3.98)
+  - Losing (PF < 1) on 7/22, mostly low-volatility / defensive names (MCD, PG, HD, UNH, LIN) where a fixed 10% target is rarely reached
+  - Below buy-and-hold on most symbols: the regime gate keeps the system out of the market most of the time
+  - Universe: `backtest.universe` in `resources/technical_config.json` (~10 min per run)
 - Run all backtests: `python run_backtest_all.py`
 - Refresh backtest data (free, Yahoo Finance): `python download_historicals.py` (`--windows-certs` behind TLS interception)
 - **Architecture**: See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system design with diagrams.
