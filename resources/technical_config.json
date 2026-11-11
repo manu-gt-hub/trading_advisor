@@ -187,6 +187,11 @@
     "exit_regimes_note": "Close an open position at the current price when its regime becomes one of these (e.g. [\"TRENDING_DOWN\"]). Empty = disabled. Only symbols analysed in the run are checked."
   },
 
+  "valuation": {
+    "description": "Price/Book confidence adjustment from _get_valuation_metrics. Off: the backtest has no point-in-time fundamentals, so it was never validated.",
+    "apply_adjustment": false
+  },
+
   "relative_strength": {
     "description": "Benchmarks for the rs_market / rs_sector momentum factors. Fetched once per run (yfinance) only when a factor has weight > 0 or shadow mode is on.",
     "market_benchmark": "SPY",

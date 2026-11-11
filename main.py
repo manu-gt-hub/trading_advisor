@@ -181,7 +181,7 @@ def enrich_analysis_df(df, analysis, force_opinion):
             # Structured, deterministic technical label (signal + regime + sub-scores)
             sigs = metrics['signals']
             indicator_parts = []
-            for key in ['RSI', 'MACD', 'ADX', 'SMA_50', 'SMA_200', 'ATR_14', 'Volatility_20', 'ROC_10', 'Stoch_RSI_K', 'Market_Trend']:
+            for key in ['Current_Price', 'RSI', 'MACD', 'ADX', 'SMA_50', 'SMA_200', 'ATR_14', 'Volatility_20', 'ROC_10', 'Stoch_RSI_K', 'Market_Trend']:
                 if key in sigs and sigs[key] is not None:
                     val = sigs[key]
                     indicator_parts.append(f"{key}={round(val, 2) if isinstance(val, float) else val}")

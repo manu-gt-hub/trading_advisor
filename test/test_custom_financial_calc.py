@@ -99,3 +99,26 @@ def test_evaluate_buy_interest_handles_bad_data():
     assert result["evaluation"] == "EVALUATION_FAILED"
     assert result["active_signals"] == ["Evaluation failed due to error."]
     assert "error" in result["signals"]
+
+
+EXPENSIVE = dict(__import__("tools.custom_financial_calc", fromlist=["x"]).NEUTRAL_VALUATION,
+                 price_to_book=25.0, valuation_adjustment=-0.05, valuation_reasons="P/B=25.0>20 (very expensive)")
+
+
+@pytest.mark.parametrize("apply, expected_adj", [(False, 0.0), (True, -0.05)])
+def test_valuation_adjustment_is_off_unless_enabled(monkeypatch, apply, expected_adj):
+    from tools import technical_engine
+    monkeypatch.setenv("ENGINE_CONFIG_OVERRIDES", f'{{"valuation.apply_adjustment": {str(apply).lower()}}}')
+    technical_engine.load_config(force_reload=True)
+    try:
+        df = load_hist_data()
+        with patch("tools.custom_financial_calc._get_valuation_metrics", return_value=dict(EXPENSIVE)):
+            result = evaluate_buy_interest("MSFT", df, df['close'].iloc[-1])
+    finally:
+        monkeypatch.delenv("ENGINE_CONFIG_OVERRIDES")
+        technical_engine.load_config(force_reload=True)
+    assert result["valuation_adjustment"] == expected_adj
+    assert result["signals"]["Valuation_Adjustment"] == expected_adj
+    assert result["signals"]["Price_to_Book"] == 25.0  # still reported
+    expected_conf = max(-1.0, min(1.0, result["confidence_before_valuation"] + expected_adj))
+    assert result["confidence"] == pytest.approx(expected_conf, abs=1e-4)
