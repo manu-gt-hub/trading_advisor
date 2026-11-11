@@ -27,7 +27,7 @@ Automated stock trading signal generator driven by a **deterministic layered tec
 - **Regime classifier**: SMA + ADX → `TRENDING_UP` / `TRENDING_DOWN` / `RANGE` / `DISTRIBUTION`.
 - **Aggregation**: `directional = w_trend·trend_score + w_momentum·momentum_score`, then risk-penalized; regime gates the final signal.
 - **Supporting indicators** (reported but not in the core score): Bollinger Bands, ATR 14, Fibonacci retracements, candlestick patterns, weekly confirmation, S&P500 context.
-- **Valuation adjustment**: Compares `current_price` vs `book_value` (Price/Book ratio) and applies a confidence bonus/penalty:
+- **Valuation adjustment** (**off** since 2026-11: `valuation.apply_adjustment=false`; the backtest has no point-in-time fundamentals, so it was never validated, and P/B says little for asset-light companies). P/B is still reported in the Analysis sheet. When enabled it compares `current_price` vs `book_value` (Price/Book ratio) and applies a confidence bonus/penalty:
   - P/B < 1: **+0.07** (below book value — rare opportunity)
   - P/B < 2: **+0.05** (cheap)
   - P/B < 5: **+0.02** (reasonable)

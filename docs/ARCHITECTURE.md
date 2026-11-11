@@ -172,7 +172,7 @@ flowchart TD
 | Stage | Where | Input | Notes |
 |---|---|---|---|
 | Engine | `technical_engine.decide` | Feature vector | BUY only in regime `TRENDING_UP`, with momentum, risk and confidence gates |
-| Valuation | `custom_financial_calc` | P/B from yfinance | Adds −0.05…+0.07 to confidence **after** the decision |
+| Valuation | `custom_financial_calc` | P/B from yfinance | **Off** (`valuation.apply_adjustment=false`, never backtested). When on, adds −0.05…+0.07 to confidence **after** the decision |
 | LLM audit | `llms.audit_buy_signal` | Indicators + sub-scores | Veto or bounded adjustment; an API error is treated as a veto |
 | Confidence | `main.filter_buys_by_confidence` | Audited confidence | Same env var as the engine's BUY threshold |
 | Position | `main.main` | Transactions sheet | One open position per symbol |

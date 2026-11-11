@@ -232,3 +232,47 @@ Per year: 2023 +2.41% (36) · 2024 +2.08% (30) · 2025 +1.10% (17) · 2026 +3.91
 Per symbol avg return IN → OUT: AAPL +1.19 → +0.31 · NVDA +3.84 → +2.78 ·
 KO +0.58 → +2.81 · META +2.16 → +0.63 · V +2.37 → +1.67 · MSFT has no OOS
 trades (its CSV ends 2025-05) — refreshing MSFT data is pending.
+
+---
+
+## 2026-11-11 — P/B adjustment off, price in the label (baseline unchanged) + rejected ATR exit target
+
+**Baseline unchanged.** The backtest always ran with a neutral valuation (no
+point-in-time fundamentals) and the label is display only, so trades are
+identical. Re-run on this code: 22 symbols (`backtest.universe`), data
+2021-11 → 2026-11, real point-in-time S&P500 context. This is the first logged
+run of the 22-symbol universe and the current reference:
+
+| Period | Trades | Win% | AvgRet | PF | AvgMFE | AvgMAE |
+|---|---|---|---|---|---|---|
+| In-sample (< 2025-01-01) | 191 | 16.8% | +1.55% | 2.32 | +4.57% | -2.33% |
+| **Out-of-sample (≥ 2025-01-01)** | **159** | 14.5% | **+1.33%** | **2.12** | +4.20% | -2.41% |
+| All | 350 | 15.7% | +1.45% | 2.23 | +4.40% | -2.37% |
+
+Exit reasons: target 55 (+10.00%) · trailing stop 193 (+1.88%) · stop loss 98
+(-4.09%) · open at end 4. Per year: 2022 -1.14% (5) · 2023 +1.51% (86) ·
+2024 +1.71% (100) · 2025 +1.55% (75) · 2026 +1.14% (84).
+
+### Changes
+
+- **P/B valuation adjustment off** (`valuation.apply_adjustment=false`). It
+  added -0.05…+0.07 to confidence in production only and was never backtested;
+  with `MIN_BUY_CONFIDENCE=0.5` its only effect was to drop BUYs of high P/B
+  names. P/B is still reported. Production may now emit a few more BUYs on high
+  P/B names; this cannot be measured offline.
+- **`Current_Price` added** to the `manual_financial_analysis` label.
+
+### Rejected: sell at the ATR take-profit instead of the fixed 10%
+
+Hypothesis: exits use the fixed 10% target while R:R and the sheet use
+min(10%, 3×ATR), so low-volatility names rarely reach their target. Tested by
+selling at min(10%, 3×ATR):
+
+| | Trades | Target hit | AvgRet | PF | OOS AvgRet | OOS PF |
+|---|---|---|---|---|---|---|
+| Baseline (10% fixed) | 350 | 15.7% | +1.45% | 2.23 | +1.33% | 2.12 |
+| ATR target | 414 | 25.8% | +1.13% | 1.95 | +1.02% | 1.84 |
+
+More targets hit but winners are cut (+5.84% vs +10.00% per target exit) and
+more trades end at the stop (122 vs 98). Out-of-sample degrades → not applied;
+the existing regression tests that keep the 10% target are right.

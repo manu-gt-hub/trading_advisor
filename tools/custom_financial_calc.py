@@ -671,7 +671,12 @@ def evaluate_buy_interest(symbol: str, df: pd.DataFrame, current_price: float, s
         # -------------------------
         # Apply valuation adjustment to confidence (bonus/penalty)
         # -------------------------
-        valuation_adj = valuation["valuation_adjustment"]
+        apply_valuation = engine_cfg.get("valuation", {}).get("apply_adjustment", False)
+        valuation_adj = valuation["valuation_adjustment"] if apply_valuation else 0.0
+        if not apply_valuation:
+            # P/B metrics stay informative only; report the adjustment actually applied
+            signals_dict["Valuation_Adjustment"] = 0.0
+            signals_dict["Valuation_Reasons"] = f"{valuation['valuation_reasons']} | not applied (valuation.apply_adjustment=false)"
         confidence_before_valuation = confidence
         confidence = max(-1.0, min(1.0, confidence + valuation_adj))
         if valuation_adj != 0:
