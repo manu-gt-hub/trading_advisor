@@ -1,4 +1,4 @@
-# AGENTS.md — Instructions for AI coding agents (Claude, GPT, Devin, Cursor, etc.)
+# AGENTS.md — Instructions for AI coding agents (Claude, GPT, Cursor, etc.)
 
 This file is the **harness contract** for any LLM/agent working on this repository.
 Read it fully before making changes. If your host also loads `CLAUDE.md` or similar
