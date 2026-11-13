@@ -1,6 +1,6 @@
 # evals/ — Agent evaluation harness
 
-Evaluate whether an AI agent (Claude, GPT, Devin, LLaMA, human, ...) correctly
+Evaluate whether an AI agent (Claude, GPT, LLaMA, human, ...) correctly
 follows this repo's workflow rules — especially the
 **backtest-before-commit** contract.
 
